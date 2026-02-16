@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "directus": "10.10.0",
+  "collections": [
+    {
+      "collection": "categorías",
+      "meta": { "collection": "categorías", "hidden": false, "singleton": false },
+      "schema": { "name": "categorías" }
+    },
+    {
+      "collection": "製品",
+      "meta": { "collection": "製品", "hidden": false, "singleton": false },
+      "schema": { "name": "製品" }
+    }
+  ],
+  "fields": [
+    {
+      "collection": "categorías",
+      "field": "id",
+      "type": "integer",
+      "meta": { "id": 1, "collection": "categorías", "field": "id" },
+      "schema": { "name": "id", "table": "categorías", "data_type": "integer", "is_nullable": false, "is_primary_key": true }
+    },
+    {
+      "collection": "categorías",
+      "field": "nombre",
+      "type": "string",
+      "meta": { "id": 2, "collection": "categorías", "field": "nombre" },
+      "schema": { "name": "nombre", "table": "categorías", "data_type": "varchar(255)", "is_nullable": false, "is_primary_key": false }
+    },
+    {
+      "collection": "製品",
+      "field": "id",
+      "type": "integer",
+      "meta": { "id": 3, "collection": "製品", "field": "id" },
+      "schema": { "name": "id", "table": "製品", "data_type": "integer", "is_nullable": false, "is_primary_key": true }
+    },
+    {
+      "collection": "製品",
+      "field": "名前",
+      "type": "string",
+      "meta": { "id": 4, "collection": "製品", "field": "名前" },
+      "schema": { "name": "名前", "table": "製品", "data_type": "varchar(255)", "is_nullable": false, "is_primary_key": false }
+    }
+  ],
+  "relations": []
+}

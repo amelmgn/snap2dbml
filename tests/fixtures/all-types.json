@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "directus": "10.10.0",
+  "collections": [
+    {
+      "collection": "all_types",
+      "meta": { "collection": "all_types", "hidden": false, "singleton": false },
+      "schema": { "name": "all_types" }
+    }
+  ],
+  "fields": [
+    { "collection": "all_types", "field": "id", "type": "uuid", "meta": { "id": 1, "collection": "all_types", "field": "id" }, "schema": { "name": "id", "table": "all_types", "data_type": "uuid", "is_nullable": false, "is_primary_key": true } },
+    { "collection": "all_types", "field": "str_field", "type": "string", "meta": { "id": 2, "collection": "all_types", "field": "str_field" }, "schema": { "name": "str_field", "table": "all_types", "data_type": "varchar(255)", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "text_field", "type": "text", "meta": { "id": 3, "collection": "all_types", "field": "text_field" }, "schema": { "name": "text_field", "table": "all_types", "data_type": "text", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "int_field", "type": "integer", "meta": { "id": 4, "collection": "all_types", "field": "int_field" }, "schema": { "name": "int_field", "table": "all_types", "data_type": "integer", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "bigint_field", "type": "bigInteger", "meta": { "id": 5, "collection": "all_types", "field": "bigint_field" }, "schema": { "name": "bigint_field", "table": "all_types", "data_type": "bigint", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "float_field", "type": "float", "meta": { "id": 6, "collection": "all_types", "field": "float_field" }, "schema": { "name": "float_field", "table": "all_types", "data_type": "float", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "decimal_field", "type": "decimal", "meta": { "id": 7, "collection": "all_types", "field": "decimal_field" }, "schema": { "name": "decimal_field", "table": "all_types", "data_type": "numeric(10,2)", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "bool_field", "type": "boolean", "meta": { "id": 8, "collection": "all_types", "field": "bool_field" }, "schema": { "name": "bool_field", "table": "all_types", "data_type": "boolean", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "ts_field", "type": "timestamp", "meta": { "id": 9, "collection": "all_types", "field": "ts_field" }, "schema": { "name": "ts_field", "table": "all_types", "data_type": "timestamp with time zone", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "dt_field", "type": "dateTime", "meta": { "id": 10, "collection": "all_types", "field": "dt_field" }, "schema": { "name": "dt_field", "table": "all_types", "data_type": "datetime", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "date_field", "type": "date", "meta": { "id": 11, "collection": "all_types", "field": "date_field" }, "schema": { "name": "date_field", "table": "all_types", "data_type": "date", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "time_field", "type": "time", "meta": { "id": 12, "collection": "all_types", "field": "time_field" }, "schema": { "name": "time_field", "table": "all_types", "data_type": "time", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "json_field", "type": "json", "meta": { "id": 13, "collection": "all_types", "field": "json_field" }, "schema": { "name": "json_field", "table": "all_types", "data_type": "json", "is_nullable": true, "is_primary_key": false } },
+    { "collection": "all_types", "field": "csv_field", "type": "csv", "meta": { "id": 14, "collection": "all_types", "field": "csv_field" }, "schema": null },
+    { "collection": "all_types", "field": "hash_field", "type": "hash", "meta": { "id": 15, "collection": "all_types", "field": "hash_field" }, "schema": null },
+    { "collection": "all_types", "field": "alias_field", "type": "alias", "meta": { "id": 16, "collection": "all_types", "field": "alias_field" }, "schema": null },
+    { "collection": "all_types", "field": "group_field", "type": "group", "meta": { "id": 17, "collection": "all_types", "field": "group_field" }, "schema": null },
+    { "collection": "all_types", "field": "unknown_field", "type": "customWidget", "meta": { "id": 18, "collection": "all_types", "field": "unknown_field" }, "schema": null }
+  ],
+  "relations": []
+}

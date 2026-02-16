@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "directus": "10.10.0",
+  "collections": [
+    {
+      "collection": "posts",
+      "meta": {
+        "collection": "posts",
+        "icon": null,
+        "note": "Blog posts",
+        "hidden": false,
+        "singleton": false
+      },
+      "schema": {
+        "name": "posts"
+      }
+    }
+  ],
+  "fields": [
+    {
+      "collection": "posts",
+      "field": "id",
+      "type": "uuid",
+      "meta": {
+        "id": 1,
+        "collection": "posts",
+        "field": "id"
+      },
+      "schema": {
+        "name": "id",
+        "table": "posts",
+        "data_type": "uuid",
+        "is_nullable": false,
+        "is_primary_key": true
+      }
+    },
+    {
+      "collection": "posts",
+      "field": "title",
+      "type": "string",
+      "meta": {
+        "id": 2,
+        "collection": "posts",
+        "field": "title",
+        "required": true
+      },
+      "schema": {
+        "name": "title",
+        "table": "posts",
+        "data_type": "character varying(255)",
+        "max_length": 255,
+        "is_nullable": false,
+        "is_primary_key": false
+      }
+    },
+    {
+      "collection": "posts",
+      "field": "body",
+      "type": "text",
+      "meta": {
+        "id": 3,
+        "collection": "posts",
+        "field": "body"
+      },
+      "schema": {
+        "name": "body",
+        "table": "posts",
+        "data_type": "text",
+        "is_nullable": true,
+        "is_primary_key": false
+      }
+    },
+    {
+      "collection": "posts",
+      "field": "published",
+      "type": "boolean",
+      "meta": {
+        "id": 4,
+        "collection": "posts",
+        "field": "published"
+      },
+      "schema": {
+        "name": "published",
+        "table": "posts",
+        "data_type": "boolean",
+        "default_value": false,
+        "is_nullable": false,
+        "is_primary_key": false
+      }
+    },
+    {
+      "collection": "posts",
+      "field": "created_at",
+      "type": "timestamp",
+      "meta": {
+        "id": 5,
+        "collection": "posts",
+        "field": "created_at"
+      },
+      "schema": {
+        "name": "created_at",
+        "table": "posts",
+        "data_type": "timestamp with time zone",
+        "default_value": "now()",
+        "is_nullable": false,
+        "is_primary_key": false
+      }
+    }
+  ],
+  "relations": []
+}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "directus": "10.10.0",
+  "collections": [
+    {
+      "collection": "posts",
+      "meta": { "collection": "posts", "hidden": false, "singleton": false },
+      "schema": { "name": "posts" }
+    },
+    {
+      "collection": "posts",
+      "meta": { "collection": "posts", "hidden": false, "singleton": false },
+      "schema": { "name": "posts" }
+    }
+  ],
+  "fields": [],
+  "relations": []
+}

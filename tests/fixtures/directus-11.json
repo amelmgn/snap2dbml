@@ -1,0 +1,59 @@
+{
+  "version": 4,
+  "directus": "11.0.0",
+  "collections": [
+    {
+      "collection": "articles",
+      "meta": {
+        "collection": "articles",
+        "icon": null,
+        "note": null,
+        "hidden": false,
+        "singleton": false
+      },
+      "schema": {
+        "name": "articles"
+      }
+    }
+  ],
+  "fields": [
+    {
+      "collection": "articles",
+      "field": "id",
+      "type": "integer",
+      "meta": {
+        "id": 1,
+        "collection": "articles",
+        "field": "id"
+      },
+      "schema": {
+        "name": "id",
+        "table": "articles",
+        "data_type": "integer",
+        "is_nullable": false,
+        "is_primary_key": true,
+        "has_auto_increment": true
+      }
+    },
+    {
+      "collection": "articles",
+      "field": "title",
+      "type": "string",
+      "meta": {
+        "id": 2,
+        "collection": "articles",
+        "field": "title",
+        "required": true
+      },
+      "schema": {
+        "name": "title",
+        "table": "articles",
+        "data_type": "varchar(255)",
+        "max_length": 255,
+        "is_nullable": false,
+        "is_primary_key": false
+      }
+    }
+  ],
+  "relations": []
+}

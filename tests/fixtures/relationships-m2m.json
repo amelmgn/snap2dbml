@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "directus": "10.10.0",
+  "collections": [
+    {
+      "collection": "posts",
+      "meta": { "collection": "posts", "hidden": false, "singleton": false },
+      "schema": { "name": "posts" }
+    },
+    {
+      "collection": "tags",
+      "meta": { "collection": "tags", "hidden": false, "singleton": false },
+      "schema": { "name": "tags" }
+    },
+    {
+      "collection": "posts_tags",
+      "meta": { "collection": "posts_tags", "hidden": true, "singleton": false },
+      "schema": { "name": "posts_tags" }
+    }
+  ],
+  "fields": [
+    {
+      "collection": "posts",
+      "field": "id",
+      "type": "uuid",
+      "meta": { "id": 1, "collection": "posts", "field": "id" },
+      "schema": { "name": "id", "table": "posts", "data_type": "uuid", "is_nullable": false, "is_primary_key": true }
+    },
+    {
+      "collection": "posts",
+      "field": "title",
+      "type": "string",
+      "meta": { "id": 2, "collection": "posts", "field": "title" },
+      "schema": { "name": "title", "table": "posts", "data_type": "varchar(255)", "is_nullable": false, "is_primary_key": false }
+    },
+    {
+      "collection": "tags",
+      "field": "id",
+      "type": "uuid",
+      "meta": { "id": 3, "collection": "tags", "field": "id" },
+      "schema": { "name": "id", "table": "tags", "data_type": "uuid", "is_nullable": false, "is_primary_key": true }
+    },
+    {
+      "collection": "tags",
+      "field": "name",
+      "type": "string",
+      "meta": { "id": 4, "collection": "tags", "field": "name" },
+      "schema": { "name": "name", "table": "tags", "data_type": "varchar(255)", "is_nullable": false, "is_primary_key": false }
+    },
+    {
+      "collection": "posts_tags",
+      "field": "id",
+      "type": "integer",
+      "meta": { "id": 5, "collection": "posts_tags", "field": "id" },
+      "schema": { "name": "id", "table": "posts_tags", "data_type": "integer", "is_nullable": false, "is_primary_key": true, "has_auto_increment": true }
+    },
+    {
+      "collection": "posts_tags",
+      "field": "posts_id",
+      "type": "uuid",
+      "meta": { "id": 6, "collection": "posts_tags", "field": "posts_id" },
+      "schema": { "name": "posts_id", "table": "posts_tags", "data_type": "uuid", "is_nullable": true, "is_primary_key": false }
+    },
+    {
+      "collection": "posts_tags",
+      "field": "tags_id",
+      "type": "uuid",
+      "meta": { "id": 7, "collection": "posts_tags", "field": "tags_id" },
+      "schema": { "name": "tags_id", "table": "posts_tags", "data_type": "uuid", "is_nullable": true, "is_primary_key": false }
+    },
+    {
+      "collection": "posts_tags",
+      "field": "sort_order",
+      "type": "integer",
+      "meta": { "id": 8, "collection": "posts_tags", "field": "sort_order" },
+      "schema": { "name": "sort_order", "table": "posts_tags", "data_type": "integer", "is_nullable": true, "is_primary_key": false }
+    }
+  ],
+  "relations": [
+    {
+      "collection": "posts_tags",
+      "field": "posts_id",
+      "related_collection": "posts",
+      "meta": {
+        "many_collection": "posts_tags",
+        "many_field": "posts_id",
+        "one_collection": "posts",
+        "one_field": "tags",
+        "junction_field": "tags_id"
+      },
+      "schema": {
+        "constraint_name": "posts_tags_posts_id_foreign",
+        "table": "posts_tags",
+        "column": "posts_id",
+        "foreign_key_table": "posts",
+        "foreign_key_column": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL"
+      }
+    },
+    {
+      "collection": "posts_tags",
+      "field": "tags_id",
+      "related_collection": "tags",
+      "meta": {
+        "many_collection": "posts_tags",
+        "many_field": "tags_id",
+        "one_collection": "tags",
+        "one_field": "posts",
+        "junction_field": "posts_id"
+      },
+      "schema": {
+        "constraint_name": "posts_tags_tags_id_foreign",
+        "table": "posts_tags",
+        "column": "tags_id",
+        "foreign_key_table": "tags",
+        "foreign_key_column": "id",
+        "on_update": "NO ACTION",
+        "on_delete": "SET NULL"
+      }
+    }
+  ]
+}

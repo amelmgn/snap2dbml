@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "directus": "10.10.0",
+  "collections": [
+    {
+      "collection": "directus_users",
+      "meta": { "collection": "directus_users", "hidden": true, "singleton": false },
+      "schema": { "name": "directus_users" }
+    },
+    {
+      "collection": "directus_files",
+      "meta": { "collection": "directus_files", "hidden": true, "singleton": false },
+      "schema": { "name": "directus_files" }
+    },
+    {
+      "collection": "products",
+      "meta": { "collection": "products", "hidden": false, "singleton": false },
+      "schema": { "name": "products" }
+    }
+  ],
+  "fields": [
+    {
+      "collection": "directus_users",
+      "field": "id",
+      "type": "uuid",
+      "meta": { "id": 1, "collection": "directus_users", "field": "id" },
+      "schema": { "name": "id", "table": "directus_users", "data_type": "uuid", "is_nullable": false, "is_primary_key": true }
+    },
+    {
+      "collection": "directus_files",
+      "field": "id",
+      "type": "uuid",
+      "meta": { "id": 2, "collection": "directus_files", "field": "id" },
+      "schema": { "name": "id", "table": "directus_files", "data_type": "uuid", "is_nullable": false, "is_primary_key": true }
+    },
+    {
+      "collection": "products",
+      "field": "id",
+      "type": "uuid",
+      "meta": { "id": 3, "collection": "products", "field": "id" },
+      "schema": { "name": "id", "table": "products", "data_type": "uuid", "is_nullable": false, "is_primary_key": true }
+    },
+    {
+      "collection": "products",
+      "field": "name",
+      "type": "string",
+      "meta": { "id": 4, "collection": "products", "field": "name" },
+      "schema": { "name": "name", "table": "products", "data_type": "varchar(255)", "is_nullable": false, "is_primary_key": false }
+    }
+  ],
+  "relations": []
+}

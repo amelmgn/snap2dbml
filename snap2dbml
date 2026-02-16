@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# snap2dbml - Convert Directus snapshots to DBML
+# Usage: ./snap2dbml <snapshot.json> [options]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+node "$SCRIPT_DIR/bin/snap2dbml.js" "$@"
