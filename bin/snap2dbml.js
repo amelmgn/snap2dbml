@@ -6,6 +6,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   convertSnapshotWithStats,
+  convertSnapshotToMarkdown,
   Snap2DBMLError,
   InvalidSnapshotError,
   FileTooLargeError,
@@ -15,12 +16,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(resolve(__dirname, '..', 'package.json'), 'utf-8'));
 
 function loadSettings() {
-  const settingsPath = resolve(process.cwd(), 'settings.json');
-  if (existsSync(settingsPath)) {
-    try {
-      return JSON.parse(readFileSync(settingsPath, 'utf-8'));
-    } catch {
-      process.stderr.write('snap2dbml: Warning: Could not parse settings.json, using defaults.\n');
+  const candidates = [];
+
+  if (process.env.SNAP2DBML_SETTINGS) {
+    candidates.push(resolve(process.env.SNAP2DBML_SETTINGS));
+  }
+  candidates.push(resolve(process.cwd(), 'settings.json'));
+
+  for (const settingsPath of candidates) {
+    if (existsSync(settingsPath)) {
+      try {
+        return JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      } catch {
+        process.stderr.write(`snap2dbml: Warning: Could not parse ${settingsPath}, using defaults.\n`);
+      }
     }
   }
   return {};
@@ -37,6 +46,7 @@ program
   .argument('[file]', "Path to snapshot file (reads stdin if omitted or '-')")
   .option('-o, --output <file>', 'Write output to specified file')
   .option('--stdout', 'Write output to stdout instead of file')
+  .option('--md', 'Also generate a Markdown collection description file alongside DBML')
   .option('--include-system', 'Include Directus system collections (directus_*)')
   .option('--include-comments', 'Include table/column comments from meta.note')
   .option('--max-size <mb>', 'Maximum input size in MB', '50')
@@ -49,6 +59,7 @@ program
       const quiet = opts.quiet ?? false;
       const suppressWarnings = quiet || opts.suppressWarnings;
       const maxSizeBytes = parseFloat(opts.maxSize) * 1024 * 1024;
+      const generateMd = opts.md || settings.generateMarkdown || false;
 
       // Read input — if no file given, look in settings.inputFolder
       let input;
@@ -96,22 +107,30 @@ program
         });
       }
 
-      // Convert
-      const result = convertSnapshotWithStats(snapshot, {
+      const convertOptions = {
         includeSystem: opts.includeSystem,
         includeComments: opts.includeComments,
         maxSizeBytes,
         failOnCircularReference: opts.failOnCircular,
         suppressWarnings: true, // We handle warnings ourselves in the CLI
-      });
+      };
 
-      // Output DBML
+      // Always convert to DBML
+      const result = convertSnapshotWithStats(snapshot, convertOptions);
+
+      // Determine output paths for DBML and Markdown
       let outputPath;
+      let mdPath;
       if (opts.stdout) {
-        // Explicit stdout requested
         outputPath = null;
+        mdPath = null;
       } else if (opts.output) {
         outputPath = validateOutputPath(opts.output);
+        // MD alongside explicit output: same dir, same base name, .md extension
+        if (generateMd) {
+          const base = outputPath.replace(/\.[^.]+$/, '');
+          mdPath = base + '.md';
+        }
       } else if (file && file !== '-') {
         // Default: write to outputFolder from settings (fallback: ./output)
         const outputDir = resolve(process.cwd(), settings.outputFolder || 'output');
@@ -125,16 +144,21 @@ program
           + String(now.getMinutes()).padStart(2, '0')
           + String(now.getSeconds()).padStart(2, '0');
         outputPath = resolve(outputDir, `schema_${ts}.dbml`);
+        if (generateMd) {
+          mdPath = resolve(outputDir, `description_${ts}.md`);
+        }
       }
 
-      // Clean previous .dbml files from output folder if configured
+      // Clean previous files from output folder if configured
       if (outputPath && settings.cleanOutput) {
         const outDir = dirname(outputPath);
         if (existsSync(outDir)) {
           for (const f of readdirSync(outDir)) {
-            if (f.endsWith('.dbml')) {
+            const isDbml = f.endsWith('.dbml');
+            const isMd = generateMd && f.endsWith('.md');
+            if (isDbml || isMd) {
               const fullPath = resolve(outDir, f);
-              if (fullPath !== outputPath) {
+              if (fullPath !== outputPath && fullPath !== mdPath) {
                 unlinkSync(fullPath);
               }
             }
@@ -142,6 +166,7 @@ program
         }
       }
 
+      // Write DBML
       if (outputPath) {
         writeFileSync(outputPath, result.dbml, 'utf-8');
         if (!quiet) {
@@ -149,6 +174,15 @@ program
         }
       } else {
         process.stdout.write(result.dbml);
+      }
+
+      // Generate and write Markdown alongside DBML (only when writing to a file)
+      if (generateMd && mdPath) {
+        const mdResult = convertSnapshotToMarkdown(snapshot, convertOptions);
+        writeFileSync(mdPath, mdResult.markdown, 'utf-8');
+        if (!quiet) {
+          process.stderr.write(`Written to: ${mdPath}\n`);
+        }
       }
 
       // Warnings

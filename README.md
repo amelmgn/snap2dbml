@@ -30,15 +30,17 @@ Edit `settings.json` to configure your input and output folders:
 {
   "inputFolder": "./input",
   "outputFolder": "./output",
-  "cleanOutput": true
+  "cleanOutput": true,
+  "generateMarkdown": false
 }
 ```
 
 | Setting | Description |
 |---------|-------------|
 | `inputFolder` | Folder containing your Directus snapshot JSON file. Used when no file argument is passed. |
-| `outputFolder` | Folder where generated DBML files are written. |
-| `cleanOutput` | When `true`, deletes previous `.dbml` files from the output folder before writing a new one. |
+| `outputFolder` | Folder where generated files are written. |
+| `cleanOutput` | When `true`, deletes previous `.dbml` (and `.md` when `generateMarkdown` is enabled) files from the output folder before writing new ones. |
+| `generateMarkdown` | When `true`, also generates a Markdown collection description file alongside the DBML output. |
 
 Paths can be relative (to the working directory) or absolute.
 
@@ -50,6 +52,9 @@ snap2dbml
 
 # Convert a specific snapshot file
 snap2dbml snapshot.json
+
+# Also generate a Markdown collection description alongside DBML
+snap2dbml snapshot.json --md
 
 # Write output to a specific file
 snap2dbml snapshot.json -o schema.dbml
@@ -86,6 +91,15 @@ const result = convertSnapshotWithStats(snapshotObject, {
 // result.warnings   - conversion warnings
 // result.stats      - tables/fields/relations counts, duration
 // result.metadata   - Directus version, generation timestamp
+
+// Generate a Markdown collection description
+import { convertSnapshotToMarkdown } from 'snap2dbml';
+
+const mdResult = convertSnapshotToMarkdown(snapshotObject);
+// mdResult.markdown  - Markdown string with per-collection field tables
+// mdResult.warnings  - conversion warnings
+// mdResult.stats     - tables/fields/relations counts, duration
+// mdResult.metadata  - Directus version, generation timestamp
 ```
 
 ## CLI Options
@@ -99,6 +113,7 @@ Arguments:
 Options:
   -o, --output <file>       Write output to file (default: stdout)
   --stdout                  Explicitly output to stdout
+  --md                      Also generate a Markdown collection description file alongside DBML
   --include-system          Include Directus system collections (directus_*)
   --include-comments        Include table/column comments from meta.note
   --max-size <mb>           Maximum input size in MB (default: 50)
@@ -136,7 +151,7 @@ interface ConvertOptions {
 
 ## Example Output
 
-Given a Directus snapshot, snap2dbml produces:
+Given a Directus snapshot, snap2dbml produces DBML:
 
 ```dbml
 Table brokers {
@@ -159,12 +174,34 @@ Ref: broker_licenses.broker_id > brokers.id
 
 Virtual relationship aliases (O2M, M2M) are rendered as `virtual` columns with a note showing the relationship type and target collection, making them visible in tools like ChartDB.
 
+With `--md` (or `generateMarkdown: true` in settings), snap2dbml additionally generates a Markdown file describing each collection's fields:
+
+```markdown
+### `brokers`
+
+| Field | Type | Required | Relation | Settings |
+| ----- | ---- | -------- | -------- | -------- |
+| `id` | int | Yes | Primary key | Auto-generated |
+| `currency` | int | No | -- | -- |
+| `kyc_status` | varchar(255) | No | -- | Default: 'not_started' |
+| `status` | varchar(255) | Yes | -- | Default: 'draft' |
+
+### `broker_licenses`
+
+| Field | Type | Required | Relation | Settings |
+| ----- | ---- | -------- | -------- | -------- |
+| `id` | int | Yes | Primary key | Auto-generated |
+| `broker_id` | int | No | M2O to brokers | Foreign Key |
+| `license_status` | varchar(255) | No | -- | Default: 'Valid' |
+```
+
 ## Features
 
 - **Directus v10.x and v11.x** snapshot support
 - **All standard field types** — uuid, string, integer, float, decimal, boolean, timestamp, json, and more
 - **Relationships** — M2O, O2M, M2M, and O2O with proper DBML `Ref:` syntax
 - **M2M junction tables** with metadata columns
+- **Markdown output** — generates a human-readable `.md` file with per-collection field tables (Field, Type, Required, Relation, Settings) alongside DBML via `--md` or `generateMarkdown` in settings
 - **Deterministic output** — byte-for-byte identical DBML for the same input, suitable for diffing and CI/CD
 - **Circular reference detection** with optional fail-on-circular mode
 - **System collection filtering** — excludes `directus_*` tables by default
@@ -214,15 +251,17 @@ npm run benchmark
 
 ## Architecture
 
-The conversion pipeline is a three-stage process:
+The conversion pipeline:
 
 ```
-JSON Input → Parser → Transformer → Generator → DBML Output
+JSON Input → Parser → Transformer → DBML Generator → DBML Output
+                                 ↘ MD Generator  → Markdown Output (optional)
 ```
 
 1. **Parser** — validates structure, enforces size/depth limits, checks Directus version compatibility
 2. **Transformer** — filters system collections, maps field types, resolves relationships, detects circular references
-3. **Generator** — produces sorted, deterministic DBML with proper escaping
+3. **DBML Generator** — produces sorted, deterministic DBML with proper escaping
+4. **MD Generator** — produces a Markdown document with per-collection field tables (enabled via `--md` or `generateMarkdown` setting)
 
 ## Performance
 

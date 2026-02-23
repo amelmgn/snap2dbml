@@ -1,11 +1,12 @@
 import { parseSnapshot, parseSnapshotString } from './parser.js';
 import { transformSnapshot } from './transformer.js';
 import { generateDBML } from './generator.js';
+import { generateMarkdown } from './md-generator.js';
 import type {
   DirectusSnapshot,
   ConvertOptions,
   ConvertResult,
-  ConversionWarning,
+  MarkdownConvertResult,
 } from './types.js';
 
 const VERSION = '1.0.0';
@@ -46,6 +47,58 @@ export function convertSnapshotString(json: string, options?: ConvertOptions): s
   });
 
   return convertSnapshot(parsed, options);
+}
+
+/**
+ * Convert a Directus snapshot to a Markdown document describing all collections.
+ */
+export function convertSnapshotToMarkdown(
+  snapshot: DirectusSnapshot,
+  options?: ConvertOptions,
+): MarkdownConvertResult {
+  const startTime = performance.now();
+
+  const parsed = parseSnapshot(snapshot, {
+    maxSizeBytes: options?.maxSizeBytes,
+    maxDepth: options?.maxDepth,
+  });
+
+  const transformResult = transformSnapshot(parsed, {
+    includeSystem: options?.includeSystem,
+    includeComments: options?.includeComments,
+    failOnCircularReference: options?.failOnCircularReference,
+  });
+
+  const markdown = generateMarkdown(transformResult.schema, {
+    includeComments: options?.includeComments,
+  });
+
+  const durationMs = performance.now() - startTime;
+
+  let fieldsProcessed = 0;
+  for (const table of transformResult.schema.tables) {
+    fieldsProcessed += table.columns.length;
+  }
+
+  return {
+    markdown,
+    warnings: transformResult.warnings,
+    stats: {
+      tablesProcessed: transformResult.schema.tables.length,
+      tablesExcluded: transformResult.tablesExcluded,
+      fieldsProcessed,
+      fieldsSkipped: transformResult.fieldsSkipped,
+      relationsProcessed: transformResult.schema.references.length,
+      circularReferences: transformResult.circularReferences.length,
+      durationMs,
+    },
+    metadata: {
+      directusVersion: transformResult.schema.metadata.directusVersion,
+      snapshotVersion: transformResult.schema.metadata.snapshotVersion,
+      generatedAt: new Date().toISOString(),
+      snap2dbmlVersion: VERSION,
+    },
+  };
 }
 
 /**
@@ -113,10 +166,15 @@ export type {
   ReferenceModel,
   ConvertOptions,
   ConvertResult,
+  MarkdownConvertResult,
   ConversionWarning,
   ConversionStats,
   ConversionMetadata,
 } from './types.js';
+
+// Re-export markdown generator (for programmatic use)
+export { generateMarkdown } from './md-generator.js';
+export type { MdGeneratorOptions } from './md-generator.js';
 
 // Re-export errors
 export {

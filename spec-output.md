@@ -98,12 +98,16 @@
     *   FR1.4: Support an `--output <file>` / `-o <file>` flag to write DBML to a specified file.
     *   FR1.5: Support a `--include-system` flag to include Directus system collections in the output.
     *   FR1.6: Support standard `--help` and `--version` flags.
+    *   FR1.7: Support a `--md` flag that, when file-based output is used, generates a Markdown collection description file (`.md`) alongside the DBML file — both sharing the same base filename in the output folder.
+    *   FR1.8: Support a `generateMarkdown` boolean key in `settings.json` as a persistent alternative to `--md`.
 
 *   **FR2: Library Interface (Node.js)**
     *   FR2.1: Export a primary `convertSnapshot()` function that accepts a parsed JSON object and returns a DBML string.
     *   FR2.2: Export a helper function that accepts a JSON string and returns a DBML string.
     *   FR2.3: Provide full TypeScript type definitions for function inputs and outputs.
     *   FR2.4: Throw consistent, typed error objects (e.g., `InvalidSnapshotError`, `UnsupportedFieldError`) with descriptive messages.
+    *   FR2.5: Export `convertSnapshotToMarkdown()` that accepts a parsed JSON object and returns a `MarkdownConvertResult` with the Markdown string plus warnings, stats, and metadata.
+    *   FR2.6: Export low-level `generateMarkdown(schema, options)` for use with an already-transformed `SchemaModel`.
 
 *   **FR3: Schema Translation Core**
     *   FR3.1: Map each Directus "collection" to a DBML `Table`.
@@ -149,6 +153,7 @@
 ## Scope
 ### In Scope
 *   Converting Directus **JSON** snapshot format to valid DBML.
+*   Optionally generating a human-readable Markdown file describing each collection's fields (Field, Type, Required, Relation, Settings) alongside the DBML output — enabled via `--md` CLI flag or `generateMarkdown` setting.
 *   Providing a standalone CLI tool.
 *   Providing a Node.js library with a clean, documented API.
 *   Translating core schema constructs: tables, columns, data types, primary keys, and relationships (M2O, O2M, M2M).

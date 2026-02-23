@@ -1,5 +1,6 @@
 {
   "inputFolder": "./input",
   "outputFolder": "./output",
-  "cleanOutput": true
+  "cleanOutput": true,
+  "generateMarkdown": false
 }

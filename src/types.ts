@@ -186,4 +186,11 @@ export interface GeneratorOptions {
   includeComments?: boolean;
 }
 
+export interface MarkdownConvertResult {
+  markdown: string;
+  warnings: ConversionWarning[];
+  stats: ConversionStats;
+  metadata: ConversionMetadata;
+}
+
 export type RelationType = 'M2O' | 'O2M' | 'M2M' | 'O2O';

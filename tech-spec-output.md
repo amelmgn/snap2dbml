@@ -44,13 +44,16 @@ This document specifies the technical architecture and implementation details fo
 │    ├── convertSnapshot(snapshot, options): string           │
 │    ├── convertSnapshotString(json, options): string         │
 │    ├── convertSnapshotWithStats(snapshot, options): Result  │
+│    ├── convertSnapshotToMarkdown(snapshot, options): Result │
+│    ├── generateMarkdown(schema, options): string            │
 │    └── Exports: All public types & errors                   │
 ├─────────────────────────────────────────────────────────────┤
 │  Core Modules                                               │
-│    ├── parser.ts      → Parse & validate Directus JSON      │
-│    ├── transformer.ts → Convert to intermediate repr        │
-│    ├── generator.ts   → Generate DBML string output         │
-│    └── types.ts       → Type definitions                    │
+│    ├── parser.ts       → Parse & validate Directus JSON     │
+│    ├── transformer.ts  → Convert to intermediate repr       │
+│    ├── generator.ts    → Generate DBML string output        │
+│    ├── md-generator.ts → Generate Markdown output           │
+│    └── types.ts        → Type definitions                   │
 ├─────────────────────────────────────────────────────────────┤
 │  Utilities                                                  │
 │    ├── type-map.ts    → Directus → DBML type mappings       │
@@ -76,13 +79,15 @@ Input (JSON string or object)
 └──────────────┘   Filters system collections (unless --include-system)
     │              Resolves relationships (M2O, O2M, M2M, O2O)
     │              Detects circular references (warning by default)
-    ▼
-┌──────────────┐
-│  Generator   │ → Produces DBML string
-└──────────────┘   Deterministic ordering (alphabetical)
-    │              Escapes special characters
-    ▼
-Output (DBML string or ConvertResult)
+    ├──────────────────────────────────────┐
+    ▼                                      ▼
+┌──────────────┐                 ┌─────────────────┐
+│ DBML Gen.    │                 │  MD Generator   │ (optional: --md or
+└──────────────┘                 └─────────────────┘  generateMarkdown)
+    │ Deterministic ordering          │ Per-collection GFM tables
+    │ Escapes special characters      │ Field/Type/Required/Relation/Settings
+    ▼                                 ▼
+DBML output                      Markdown output
 ```
 
 ## 4. Component Design
@@ -213,7 +218,42 @@ If a table has `virtualFields`, they are rendered as `// name [kind]` comment li
 - Single quotes: `\'`
 - Newlines in comments: replace with space
 
-### 4.4 Type Mapping (`src/type-map.ts`)
+### 4.4 Markdown Generator Module (`src/md-generator.ts`)
+
+**Responsibility**: Produce a human-readable Markdown document describing all collections and their fields.
+
+```typescript
+interface MdGeneratorOptions {
+  includeComments?: boolean;
+}
+
+function generateMarkdown(schema: SchemaModel, options?: MdGeneratorOptions): string;
+```
+
+**Output Format**: GitHub Flavored Markdown (GFM). One `### \`collection_name\`` section per collection, each containing a table with columns:
+
+| Column | Source |
+|--------|--------|
+| **Field** | Column name, wrapped in backticks |
+| **Type** | DBML type from the intermediate model |
+| **Required** | `Yes` if `!isNullable` (NOT NULL constraint), otherwise `No` |
+| **Relation** | `Primary key` / `M2O to {table}` / `{KIND} → {collection}` for virtual fields / `--` |
+| **Settings** | `Auto-generated` for PKs; `Foreign Key` for FKs; default value if set; notes if `includeComments`; `--` if none |
+
+**Sorting**: Same as DBML generator — tables alphabetically, PKs first then columns alphabetically, virtual fields alphabetically.
+
+**Example output**:
+```markdown
+### `posts`
+
+| Field | Type | Required | Relation | Settings |
+| ----- | ---- | -------- | -------- | -------- |
+| `id` | uuid | Yes | Primary key | Auto-generated |
+| `author_id` | uuid | No | M2O to authors | Foreign Key |
+| `title` | varchar(255) | Yes | -- | -- |
+```
+
+### 4.5 Type Mapping (`src/type-map.ts`)
 
 | Directus Type | DBML Type |
 |---------------|-----------|
@@ -311,6 +351,12 @@ export function convertSnapshot(snapshot: DirectusSnapshot, options?: ConvertOpt
 export function convertSnapshotString(json: string, options?: ConvertOptions): string;
 export function convertSnapshotWithStats(snapshot: DirectusSnapshot, options?: ConvertOptions): ConvertResult;
 
+// Generates a Markdown collection description alongside (not instead of) DBML
+export function convertSnapshotToMarkdown(snapshot: DirectusSnapshot, options?: ConvertOptions): MarkdownConvertResult;
+
+// Low-level: generate Markdown directly from an intermediate SchemaModel
+export function generateMarkdown(schema: SchemaModel, options?: MdGeneratorOptions): string;
+
 // === Options ===
 
 export interface ConvertOptions {
@@ -328,10 +374,22 @@ export interface ConvertOptions {
   failOnCircularReference?: boolean;
 }
 
+export interface MdGeneratorOptions {
+  /** Include table/column notes from meta.note. Default: false */
+  includeComments?: boolean;
+}
+
 // === Result types ===
 
 export interface ConvertResult {
   dbml: string;
+  warnings: ConversionWarning[];
+  stats: ConversionStats;
+  metadata: ConversionMetadata;
+}
+
+export interface MarkdownConvertResult {
+  markdown: string;
   warnings: ConversionWarning[];
   stats: ConversionStats;
   metadata: ConversionMetadata;
@@ -382,6 +440,8 @@ Arguments:
 
 Options:
   -o, --output <file>       Write output to file instead of stdout
+  --stdout                  Explicitly output to stdout
+  --md                      Also generate a Markdown collection description file alongside DBML
   --include-system          Include Directus system collections (directus_*)
   --include-comments        Include table/column comments from meta.note
   --max-size <mb>           Maximum input size in MB (default: 50)
@@ -402,6 +462,7 @@ Exit Codes:
 
 Examples:
   snap2dbml snapshot.json
+  snap2dbml snapshot.json --md
   snap2dbml snapshot.json -o schema.dbml
   snap2dbml --include-system < snapshot.json
   cat snapshot.json | snap2dbml -o schema.dbml --verbose
@@ -410,8 +471,18 @@ Examples:
 **CLI Behavior**:
 - All files read/written in UTF-8 encoding
 - Output path must resolve within CWD (no path traversal)
+- `--md`: Generates both `schema_YYYYMMDD_HHMMSS.dbml` and `schema_YYYYMMDD_HHMMSS.md` in the output folder. When `--output` is specified, DBML goes to the given path and MD is written to the same path with `.md` extension. MD is not generated when `--stdout` is used.
 - `--verbose`: Appends stats/metadata as JSON line after DBML output
 - `--quiet`: No stderr output except fatal errors
+
+**`settings.json` keys**:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `inputFolder` | string | — | Folder scanned for snapshot JSON when no file argument given |
+| `outputFolder` | string | `"output"` | Folder where generated files are written |
+| `cleanOutput` | boolean | `false` | Delete previous `.dbml` (and `.md` when MD is enabled) before writing |
+| `generateMarkdown` | boolean | `false` | Same as `--md`: also generate a Markdown file alongside DBML |
 
 ## 6. Data Models
 
@@ -545,6 +616,7 @@ snap2dbml/
 │   ├── parser.ts
 │   ├── transformer.ts
 │   ├── generator.ts
+│   ├── md-generator.ts
 │   ├── type-map.ts
 │   ├── errors.ts
 │   ├── constants.ts
