@@ -106,13 +106,24 @@ const mdResult = convertSnapshotToMarkdown(snapshotObject);
 
 snap2dbml can run as a stateless HTTP backend service — useful for automation via n8n, CI/CD pipelines, or any HTTP client.
 
-**Run with Docker:**
+**Local development:**
 
 ```bash
 cp .env.example .env
-# Set API_KEY and PORT in .env
-docker compose up -d --build
+# Set API_KEY in .env
+docker compose -f docker-compose.dev.yml up -d --build
+curl http://localhost:3001/health
 ```
+
+**Production (VPS) — image pulled from GitHub Container Registry:**
+
+```bash
+cp .env.example .env
+# Set API_KEY and GHCR_OWNER (your GitHub username) in .env
+docker compose pull && docker compose up -d
+```
+
+The image is built and pushed automatically to `ghcr.io` on every push to the `stage` branch via GitHub Actions. No source code needed on the server.
 
 **Endpoints:**
 
@@ -151,6 +162,7 @@ Response:
 |----------|-------------|
 | `PORT` | Port to listen on (default: `3000`) |
 | `API_KEY` | Secret for `X-API-Key` header. Leave empty to disable auth (not recommended). |
+| `GHCR_OWNER` | Your GitHub username — used by `docker-compose.yml` to pull the image from `ghcr.io`. |
 
 **n8n integration:**
 
