@@ -1,7 +1,7 @@
 # PRD: Directus Snapshot to DBML Translator (`snap2dbml`)
 
 ## Executive Summary
-`snap2dbml` is a developer tool that automates the conversion of Directus's proprietary JSON schema snapshots into the standard DBML (Database Markup Language) format. It eliminates the manual, error-prone process of creating database diagrams, giving teams instant visual documentation compatible with tools like dbdiagram.io. The tool is delivered as a dual-mode package: a Command Line Interface (CLI) for ad-hoc use and a Node.js library for integration into CI/CD pipelines.
+`snap2dbml` is a developer tool that automates the conversion of Directus's proprietary JSON schema snapshots into the standard DBML (Database Markup Language) format. It eliminates the manual, error-prone process of creating database diagrams, giving teams instant visual documentation compatible with tools like dbdiagram.io. The tool is delivered as a tri-mode package: a Command Line Interface (CLI) for ad-hoc use, a Node.js library for integration into CI/CD pipelines, and an HTTP backend service for automation workflows (n8n, webhooks, external tooling).
 
 ## Problem Statement / Opportunity
 **Problem**: Teams using Directus lack a straightforward way to generate visual, shareable database schema documentation, creating friction in development, review, and stakeholder communication.
@@ -90,6 +90,10 @@
     **I want** the tool to correctly handle table and column names containing non-ASCII characters (UTF-8),
     **so that** our localized schema is translated accurately.
 
+11. **As** Maya, a Developer using n8n for automation,
+    **I want to** send a Directus snapshot to a self-hosted HTTP endpoint and receive DBML and Markdown in the response,
+    **so that** I can integrate schema conversion into automated workflows without installing the CLI on every machine.
+
 ## Functional Requirements
 *   **FR1: CLI Interface**
     *   FR1.1: Accept a file path to a Directus JSON snapshot as a positional argument.
@@ -122,6 +126,15 @@
     *   FR3.10: Correctly handle table and column names containing non-ASCII (UTF-8) characters.
     *   FR3.11: Annotate Directus virtual relationship fields (`alias` fields with `o2m`, `m2m`, or `translations` specials) as DBML comments within their parent table, preserving visibility of relationships that exist in the Directus UI but have no physical database column. Pure UI layout aliases (e.g., field groups) are excluded.
 
+*   **FR5: HTTP Server Interface**
+    *   FR5.1: Expose a `POST /convert` endpoint accepting a JSON body with a `snapshot` field (Directus snapshot object) and optional `generateMarkdown` boolean and `options` object.
+    *   FR5.2: Return a JSON response with fields: `dbml` (string), `md` (string or null), `warnings`, `stats`, and `metadata`.
+    *   FR5.3: Expose a `GET /health` endpoint returning `{"status":"ok"}` without authentication, for use with container health checks and monitoring.
+    *   FR5.4: Support API key authentication via an `X-API-Key` request header, configured through the `API_KEY` environment variable. Authentication is skipped if `API_KEY` is not set.
+    *   FR5.5: Reject request bodies exceeding 50 MB with HTTP 413.
+    *   FR5.6: Return HTTP 422 with an `error` field when the snapshot conversion fails (e.g., invalid snapshot structure).
+    *   FR5.7: Be deployable as a Docker container via the provided `Dockerfile` and `docker-compose.yml`. Port is configurable via the `PORT` environment variable (default: 3000).
+
 *   **FR4: Error Handling & Validation**
     *   FR4.1: Validate input is parseable JSON.
     *   FR4.2: Validate input JSON conforms to the basic structure of a Directus snapshot (e.g., has `collections` and `fields` arrays).
@@ -153,9 +166,10 @@
 ## Scope
 ### In Scope
 *   Converting Directus **JSON** snapshot format to valid DBML.
-*   Optionally generating a human-readable Markdown file describing each collection's fields (Field, Type, Required, Relation, Settings) alongside the DBML output — enabled via `--md` CLI flag or `generateMarkdown` setting.
+*   Optionally generating a human-readable Markdown file describing each collection's fields (Field, Type, Required, Relation, Settings) alongside the DBML output — enabled via `--md` CLI flag, `generateMarkdown` setting, or `generateMarkdown` HTTP request field.
 *   Providing a standalone CLI tool.
 *   Providing a Node.js library with a clean, documented API.
+*   Providing a stateless HTTP backend service (`POST /convert`) deployable via Docker, with API key authentication and a `/health` endpoint.
 *   Translating core schema constructs: tables, columns, data types, primary keys, and relationships (M2O, O2M, M2M).
 *   Full representation of M2M junction tables including metadata columns.
 *   Basic field constraints: nullability and default values.
@@ -169,11 +183,12 @@
 *   Translation of Directus-specific metadata (interfaces, display templates, validation rules). Note: virtual relationship aliases (O2M, M2M, translations) are annotated as DBML comments — see FR3.11.
 *   Reverse engineering (DBML to Directus snapshot).
 *   Direct API integration with any visualization service (e.g., dbdiagram.io).
-*   Graphical User Interface (GUI) or web application.
+*   Graphical User Interface (GUI).
 *   Schema diff visualization (tool enables diffing, but does not create visual diffs).
 *   Schema migration or synchronization capabilities.
 *   Support for Directus versions prior to 10.0.
 *   Custom field type mapping configuration (may be added in future versions).
+*   Built-in TLS/HTTPS termination for the HTTP server (handled by a reverse proxy such as nginx).
 
 ## Dependencies
 | Dependency | Type | Risk & Notes |
@@ -182,6 +197,7 @@
 | **DBML Specification** | External / Output | **LOW**. DBML is a stable, open specification. We target a well-supported subset. |
 | **Node.js Runtime (v18+)** | Runtime | **LOW**. Standard, widely available environment. |
 | **`commander` (or similar CLI lib)** | Runtime (for CLI) | **LOW**. Mature, stable library for parsing CLI arguments. A direct dependency of the published CLI binary. |
+| **Docker** | Deployment (HTTP server) | **LOW**. Standard container runtime for VPS deployment. The HTTP server can also run without Docker via `npm start`. |
 | **Testing Framework (`vitest`/`jest`)** | Development | **LOW**. Standard tooling. |
 
 ## Risks and Mitigations

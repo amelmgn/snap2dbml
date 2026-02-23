@@ -8,20 +8,22 @@ This document specifies the technical architecture and implementation details fo
 
 **Core Problem**: Directus stores schema information in a proprietary JSON format that cannot be directly consumed by database diagramming tools. This tool bridges that gap by translating Directus snapshots into the standardized DBML format.
 
-**Technical Scope**: A dual-mode npm package providing:
+**Technical Scope**: A tri-mode npm package providing:
 1. A CLI binary (`snap2dbml`) for command-line usage
 2. A programmatic Node.js library for integration into build pipelines
+3. A stateless HTTP backend service (`src/server.ts`) for automation workflows (n8n, webhooks, external tooling), deployable via Docker
 
 ## 2. Goals and Non-Goals
 
 ### Goals
 - Parse Directus JSON snapshot format (v10.x, v11.x)
 - Generate valid, deterministic DBML output
-- Provide both CLI and library interfaces
+- Provide CLI, library, and HTTP server interfaces
 - Achieve <2s processing for 200 collections / 2,000 fields on GitHub Actions `ubuntu-latest` runner
 - Zero runtime dependencies for core library (excluding CLI argument parser)
 - Full TypeScript type safety
 - Comprehensive error handling with actionable messages
+- HTTP server deployable as a Docker container with API key authentication
 
 ### Non-Goals
 - YAML snapshot support
@@ -30,6 +32,7 @@ This document specifies the technical architecture and implementation details fo
 - Schema migration or sync capabilities
 - GUI or web interface
 - Real-time schema monitoring
+- Built-in TLS termination (delegated to nginx or similar reverse proxy)
 
 ## 3. System Architecture
 
@@ -39,6 +42,10 @@ This document specifies the technical architecture and implementation details fo
 ├─────────────────────────────────────────────────────────────┤
 │  CLI Entry Point (bin/snap2dbml.js)                         │
 │    └── Uses: commander                                      │
+├─────────────────────────────────────────────────────────────┤
+│  HTTP Server Entry Point (src/server.ts)                    │
+│    ├── POST /convert  → { dbml, md, warnings, stats, meta } │
+│    └── GET  /health   → { status: "ok" }                    │
 ├─────────────────────────────────────────────────────────────┤
 │  Library Entry Point (src/index.ts)                         │
 │    ├── convertSnapshot(snapshot, options): string           │
@@ -218,7 +225,62 @@ If a table has `virtualFields`, they are rendered as `// name [kind]` comment li
 - Single quotes: `\'`
 - Newlines in comments: replace with space
 
-### 4.4 Markdown Generator Module (`src/md-generator.ts`)
+### 4.4 HTTP Server Module (`src/server.ts`)
+
+**Responsibility**: Expose the conversion pipeline as a stateless HTTP service. Uses Node.js built-in `node:http` — no additional runtime dependencies.
+
+**Endpoints**:
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/health` | None | Liveness check; returns `{"status":"ok"}` |
+| POST | `/convert` | `X-API-Key` | Convert snapshot; returns DBML + optional Markdown |
+
+**Request body** (`POST /convert`):
+
+```typescript
+{
+  snapshot: DirectusSnapshot;      // required
+  generateMarkdown?: boolean;      // default: false
+  options?: ConvertOptions;        // passed to convertSnapshotWithStats / convertSnapshotToMarkdown
+}
+```
+
+**Response** (HTTP 200):
+
+```typescript
+{
+  dbml: string;
+  md: string | null;               // null when generateMarkdown is false
+  warnings: ConversionWarning[];
+  stats: ConversionStats;
+  metadata: ConversionMetadata;
+}
+```
+
+**Error responses**:
+
+| Status | Condition |
+|--------|-----------|
+| 401 | `X-API-Key` header missing or incorrect (when `API_KEY` env var is set) |
+| 400 | Malformed JSON or missing `snapshot` field |
+| 404 | Unknown method/path |
+| 413 | Request body exceeds 50 MB |
+| 422 | Snapshot conversion failed (e.g., `InvalidSnapshotError`) |
+
+**Configuration** (environment variables):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | TCP port to listen on |
+| `API_KEY` | `""` | Expected value of `X-API-Key` header; empty = auth disabled |
+
+**Behaviour notes**:
+- `suppressWarnings: true` is applied by default so warnings go to the response body, not stderr
+- Body size is hard-limited to 50 MB at the HTTP layer before JSON parsing
+- The server is stateless — no files are written to disk
+
+### 4.5 Markdown Generator Module (`src/md-generator.ts`)
 
 **Responsibility**: Produce a human-readable Markdown document describing all collections and their fields.
 
@@ -253,7 +315,7 @@ function generateMarkdown(schema: SchemaModel, options?: MdGeneratorOptions): st
 | `title` | varchar(255) | Yes | -- | -- |
 ```
 
-### 4.5 Type Mapping (`src/type-map.ts`)
+### 4.6 Type Mapping (`src/type-map.ts`)
 
 | Directus Type | DBML Type |
 |---------------|-----------|
@@ -281,7 +343,7 @@ function generateMarkdown(schema: SchemaModel, options?: MdGeneratorOptions): st
 2. `type` field mapped via TYPE_MAP
 3. Fallback to `text` with warning
 
-### 4.5 Constants (`src/constants.ts`)
+### 4.7 Constants (`src/constants.ts`)
 
 ```typescript
 export const ERROR_CODES = {
@@ -305,7 +367,7 @@ export const DEFAULT_MAX_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 export const DEFAULT_MAX_DEPTH = 100;
 ```
 
-### 4.6 Error Classes (`src/errors.ts`)
+### 4.8 Error Classes (`src/errors.ts`)
 
 ```typescript
 abstract class Snap2DBMLError extends Error {
@@ -428,7 +490,30 @@ export { Snap2DBMLError, InvalidSnapshotError, UnsupportedFieldError, CircularRe
 export { ERROR_CODES, WARNING_CODES } from './constants';
 ```
 
-### 5.2 CLI Interface (`bin/snap2dbml.js`)
+### 5.2 HTTP Server API (`src/server.ts`)
+
+See section 4.4 for full specification. Summary:
+
+```
+GET  /health               → 200 {"status":"ok"}
+POST /convert              → 200 {dbml, md, warnings, stats, metadata}
+                           → 400 {error} — bad JSON or missing snapshot
+                           → 401 {error} — invalid or missing API key
+                           → 413 {error} — body too large (>50MB)
+                           → 422 {error} — conversion failed
+```
+
+Run with Docker:
+```bash
+docker compose up -d --build   # uses PORT and API_KEY from .env
+```
+
+Run without Docker:
+```bash
+npm run build && npm start
+```
+
+### 5.3 CLI Interface (`bin/snap2dbml.js`)
 
 ```
 Usage: snap2dbml [options] [file]
@@ -613,6 +698,7 @@ snap2dbml/
 │   └── snap2dbml.js
 ├── src/
 │   ├── index.ts
+│   ├── server.ts          ← HTTP server entry point
 │   ├── parser.ts
 │   ├── transformer.ts
 │   ├── generator.ts
@@ -625,7 +711,9 @@ snap2dbml/
 ├── dist/
 │   ├── index.js
 │   ├── index.d.ts
-│   └── index.js.map
+│   ├── index.js.map
+│   ├── server.js          ← compiled server (no .d.ts)
+│   └── server.js.map
 ├── tests/
 │   ├── fixtures/
 │   │   ├── basic.json
@@ -640,6 +728,10 @@ snap2dbml/
 │   ├── integration/
 │   └── fuzz/
 ├── benchmarks/
+├── Dockerfile             ← two-stage build (builder + runtime)
+├── docker-compose.yml     ← maps host port → container 3000
+├── .dockerignore
+├── .env.example           ← PORT, API_KEY
 ├── package.json
 ├── tsconfig.json
 ├── tsup.config.ts
@@ -669,6 +761,7 @@ snap2dbml/
   "files": ["dist", "bin"],
   "scripts": {
     "build": "tsup",
+    "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -696,18 +789,31 @@ snap2dbml/
 
 ### 7.3 tsup.config.ts
 
+Two separate build configurations — library (with `.d.ts`) and server (without `.d.ts`):
+
 ```typescript
 import { defineConfig } from 'tsup';
 
-export default defineConfig({
-  entry: ['src/index.ts'],
-  format: ['esm'],
-  dts: true,
-  clean: true,
-  sourcemap: true,
-  minify: false,
-  target: 'node18',
-});
+export default defineConfig([
+  {
+    entry: ['src/index.ts'],
+    format: ['esm'],
+    dts: true,
+    clean: true,
+    sourcemap: true,
+    minify: false,
+    target: 'node18',
+  },
+  {
+    entry: ['src/server.ts'],
+    format: ['esm'],
+    dts: false,
+    clean: false,
+    sourcemap: true,
+    minify: false,
+    target: 'node18',
+  },
+]);
 ```
 
 ## 8. Security Considerations
@@ -717,9 +823,12 @@ export default defineConfig({
 | Malicious JSON | Validate structure; no eval() | JSON.parse() + schema validation |
 | Path traversal (--output) | Resolve and validate path | path.resolve(); check within CWD |
 | Prototype pollution | Object.hasOwn() checks | Avoid spreading unknown objects |
-| Resource exhaustion | Size/depth limits | maxSizeBytes (50MB), maxDepth (100) |
+| Resource exhaustion | Size/depth limits | maxSizeBytes (50MB), maxDepth (100); HTTP body hard-limited to 50MB before parsing |
 | Stack overflow | Depth limits; iterative algorithms | maxDepth in parser |
 | Sensitive data exposure | Schema only, no data | Filter values during parsing |
+| Unauthorized HTTP access | API key authentication | `X-API-Key` header checked against `API_KEY` env var; 401 on mismatch |
+| HTTP brute-force | Reverse proxy rate limiting | Handled by nginx or similar; not built into the server |
+| TLS/HTTPS | Reverse proxy termination | nginx + Certbot on VPS; server itself speaks plain HTTP |
 
 ## 9. Error Handling Strategy
 
@@ -792,11 +901,44 @@ Suggestion: Ensure you are using a valid Directus snapshot file.
 
 ## 12. Deployment Strategy
 
-### npm Publishing
+### npm Publishing (CLI / Library)
 
 ```bash
 npm version patch|minor|major
 npm publish
+```
+
+### HTTP Server — VPS (Docker)
+
+```bash
+# On the server (e.g., Time4VPS)
+git clone <repo> && cd snap2dbml
+cp .env.example .env          # set API_KEY and PORT
+docker compose up -d --build  # builds image and starts container
+
+# nginx reverse proxy (HTTP → localhost:PORT)
+# Certbot for HTTPS
+```
+
+The Dockerfile uses a two-stage build:
+1. **builder** — installs all deps, runs `npm run build`
+2. **runtime** — `node:22-alpine` + production deps only + compiled `dist/`
+
+Container exposes port 3000 internally; host port is configured in `docker-compose.yml`.
+
+A `HEALTHCHECK` directive pings `/health` every 30s; Docker marks the container unhealthy after 3 consecutive failures.
+
+### HTTP Server — Without Docker
+
+```bash
+npm run build
+npm start        # node dist/server.js
+```
+
+Use PM2 for process management:
+```bash
+pm2 start dist/server.js --name snap2dbml
+pm2 save && pm2 startup
 ```
 
 ### Release Checklist
@@ -814,11 +956,13 @@ npm deprecate snap2dbml@X.Y.Z "Critical bug, use X.Y.W instead"
 npm publish  # New fixed version
 ```
 
+For Docker: redeploy previous image tag via `docker compose up -d`.
+
 ### Versioning Policy
 
 - **Patch**: Bug fixes, performance improvements
-- **Minor**: New features (backward compatible), new Directus version support
-- **Major**: Breaking API changes, dropped Node.js version support
+- **Minor**: New features (backward compatible), new Directus version support, HTTP server enhancements
+- **Major**: Breaking API changes, dropped Node.js version support, breaking HTTP API changes
 
 ## 13. Open Questions / Future Considerations
 
@@ -830,4 +974,6 @@ npm publish  # New fixed version
 | DBML TableGroups | Future | Could map to Directus folders |
 | Column notes | Implemented | Via --include-comments |
 | Virtual relationship aliases | Implemented | O2M/M2M/translations alias fields rendered as DBML comments |
+| HTTP backend service | Implemented | POST /convert via node:http, Docker deployment |
+| HTTP rate limiting | Deferred | Delegated to nginx reverse proxy |
 | Directus v12+ support | Future | Monitor format changes |
