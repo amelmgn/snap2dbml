@@ -12,7 +12,7 @@ Directus stores schema in a proprietary JSON format that isn't compatible with s
 npm install snap2dbml
 ```
 
-Requires **Node.js >= 18.0.0**.
+Requires **Node.js 18.0.0** and above.
 
 ## Quick Start
 
