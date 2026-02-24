@@ -1,4 +1,4 @@
-# snap2dbml
+## How it works
 
 Convert [Directus](https://directus.io/) JSON schema snapshots into [DBML](https://dbml.dbdiagram.io/) (Database Markup Language) format for use with database diagramming tools like [dbdiagram.io](https://dbdiagram.io/).
 
