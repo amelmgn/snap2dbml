@@ -5,3 +5,5 @@ output/
 settings.json
 *.dbml
 .DS_Store
+.env
+.claude/
