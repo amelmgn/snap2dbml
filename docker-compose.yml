@@ -1,0 +1,8 @@
+services:
+  snap2dbml:
+    image: ghcr.io/${GHCR_OWNER}/snap2dbml:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env

@@ -2,6 +2,9 @@ node_modules/
 dist/
 input/
 output/
+product_docs/
 settings.json
 *.dbml
 .DS_Store
+.env
+.claude/

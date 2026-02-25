@@ -1,6 +1,6 @@
-# snap2dbml
+## How it works
 
-Convert [Directus](https://directus.io/) JSON schema snapshots into [DBML](https://dbml.dbdiagram.io/) (Database Markup Language) format for use with database diagramming tools like [dbdiagram.io](https://dbdiagram.io/).
+Convert [Directus](https://directus.io/) JSON schema snapshots into [DBML](https://dbml.dbdiagram.io/) (Database Markup Language) format for use with database diagramming tools.
 
 ## Why?
 
@@ -12,7 +12,7 @@ Directus stores schema in a proprietary JSON format that isn't compatible with s
 npm install snap2dbml
 ```
 
-Requires **Node.js >= 18.0.0**.
+Requires **Node.js 18.0.0** and above.
 
 ## Quick Start
 
@@ -101,6 +101,74 @@ const mdResult = convertSnapshotToMarkdown(snapshotObject);
 // mdResult.stats     - tables/fields/relations counts, duration
 // mdResult.metadata  - Directus version, generation timestamp
 ```
+
+### HTTP Server
+
+snap2dbml can run as a stateless HTTP backend service — useful for automation via n8n, CI/CD pipelines, or any HTTP client.
+
+**Local development:**
+
+```bash
+cp .env.example .env
+# Set API_KEY in .env
+docker compose -f docker-compose.dev.yml up -d --build
+curl http://localhost:3001/health
+```
+
+**Production (VPS) — image pulled from GitHub Container Registry:**
+
+```bash
+cp .env.example .env
+# Set API_KEY and GHCR_OWNER (your GitHub username) in .env
+docker compose pull && docker compose up -d
+```
+
+The image is built and pushed automatically to `ghcr.io` on every push to the `stage` branch via GitHub Actions. No source code needed on the server.
+
+**Endpoints:**
+
+`GET /health` — no authentication required. Returns `{"status":"ok"}`.
+
+`POST /convert` — convert a snapshot:
+
+```bash
+curl -X POST http://localhost:3000/convert \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret" \
+  -d '{
+    "snapshot": { ...Directus snapshot... },
+    "generateMarkdown": true,
+    "options": { "includeComments": true }
+  }'
+```
+
+Response:
+
+```json
+{
+  "dbml": "Table ...",
+  "md": "# Collections...",
+  "warnings": [],
+  "stats": { "tablesProcessed": 5, "durationMs": 12 },
+  "metadata": { "directusVersion": "11.0.0", "generatedAt": "..." }
+}
+```
+
+`md` is `null` when `generateMarkdown` is omitted or `false`.
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `PORT` | Port to listen on (default: `3000`) |
+| `API_KEY` | Secret for `X-API-Key` header. Leave empty to disable auth (not recommended). |
+| `GHCR_OWNER` | Your GitHub username — used by `docker-compose.yml` to pull the image from `ghcr.io`. |
+
+**n8n integration:**
+
+1. **HTTP Request** → `GET /api/schema/snapshot` on your Directus instance (with Directus auth token)
+2. **HTTP Request** → `POST https://your-server/convert` with `X-API-Key` header and body `{"snapshot": {{ $json }}, "generateMarkdown": true}`
+3. Use `{{ $json.dbml }}` and `{{ $json.md }}` in subsequent nodes
 
 ## CLI Options
 
@@ -202,6 +270,7 @@ With `--md` (or `generateMarkdown: true` in settings), snap2dbml additionally ge
 - **Relationships** — M2O, O2M, M2M, and O2O with proper DBML `Ref:` syntax
 - **M2M junction tables** with metadata columns
 - **Markdown output** — generates a human-readable `.md` file with per-collection field tables (Field, Type, Required, Relation, Settings) alongside DBML via `--md` or `generateMarkdown` in settings
+- **HTTP backend service** — stateless REST API for use with n8n, CI/CD pipelines, or any HTTP client; deployable via Docker
 - **Deterministic output** — byte-for-byte identical DBML for the same input, suitable for diffing and CI/CD
 - **Circular reference detection** with optional fail-on-circular mode
 - **System collection filtering** — excludes `directus_*` tables by default
@@ -256,12 +325,15 @@ The conversion pipeline:
 ```
 JSON Input → Parser → Transformer → DBML Generator → DBML Output
                                  ↘ MD Generator  → Markdown Output (optional)
+
+HTTP POST /convert → [same pipeline] → JSON response { dbml, md }
 ```
 
 1. **Parser** — validates structure, enforces size/depth limits, checks Directus version compatibility
 2. **Transformer** — filters system collections, maps field types, resolves relationships, detects circular references
 3. **DBML Generator** — produces sorted, deterministic DBML with proper escaping
-4. **MD Generator** — produces a Markdown document with per-collection field tables (enabled via `--md` or `generateMarkdown` setting)
+4. **MD Generator** — produces a Markdown document with per-collection field tables (enabled via `--md`, `generateMarkdown` setting, or `generateMarkdown: true` in HTTP request)
+5. **HTTP Server** — stateless Node.js HTTP server wrapping the same pipeline; authenticated via `X-API-Key` header
 
 ## Performance
 

@@ -17,6 +17,7 @@
   "files": ["dist", "bin"],
   "scripts": {
     "build": "tsup",
+    "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
