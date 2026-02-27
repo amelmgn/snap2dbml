@@ -1,6 +1,7 @@
 import type { DirectusSnapshot, DirectusCollection, DirectusField } from './types.js';
 import { InvalidSnapshotError } from './errors.js';
 import { SUPPORTED_SNAPSHOT_VERSIONS } from './constants.js';
+import { SKIP_TYPES } from './type-map.js';
 
 export function validateIsObject(input: unknown): asserts input is Record<string, unknown> {
   if (input === null || input === undefined) {
@@ -160,6 +161,8 @@ export function validateNoDuplicateCollections(collections: DirectusCollection[]
 export function validateNoDuplicateFields(fields: DirectusField[]): void {
   const seen = new Map<string, Set<string>>();
   for (const field of fields) {
+    // Alias/presentation/group fields are UI-only and have no DB column — skip them
+    if (SKIP_TYPES.has(field.type)) continue;
     const colKey = field.collection.toLowerCase();
     const fieldKey = field.field.toLowerCase();
     if (!seen.has(colKey)) {

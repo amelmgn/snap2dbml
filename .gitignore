@@ -3,6 +3,7 @@ dist/
 input/
 output/
 product_docs/
+temp/
 settings.json
 *.dbml
 .DS_Store

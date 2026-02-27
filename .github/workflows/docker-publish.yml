@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - stage
+      - prod
 
 jobs:
   build-and-push:
@@ -29,7 +30,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/snap2dbml
           tags: |
-            type=raw,value=latest
+            type=ref,event=branch
             type=sha,prefix=sha-,format=short
 
       - name: Build and push
