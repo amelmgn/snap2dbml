@@ -19,6 +19,7 @@ const pkg = JSON.parse(readFileSync(resolve(PROJECT_ROOT, 'package.json'), 'utf-
   version: string;
 };
 
+mkdirSync(resolve(PROJECT_ROOT, 'temp'), { recursive: true });
 const tempRoot = mkdtempSync(resolve(PROJECT_ROOT, 'temp/cli-tests-'));
 const managedOutputDir = resolve(tempRoot, 'managed-output');
 const explicitOutputDir = resolve(tempRoot, 'explicit-output');
