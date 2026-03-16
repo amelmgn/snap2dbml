@@ -1,4 +1,4 @@
-import type { SchemaModel, TableModel, ColumnModel } from './types.js';
+import type { SchemaModel, TableModel, ColumnModel, ReferenceModel } from './types.js';
 
 export interface MdGeneratorOptions {
   includeComments?: boolean;
@@ -13,10 +13,10 @@ export interface MdGeneratorOptions {
  * Sorting mirrors generateDBML: tables alphabetically, PKs first then fields alphabetically.
  */
 export function generateMarkdown(schema: SchemaModel, options?: MdGeneratorOptions): string {
-  // Build FK lookup: "table.column" -> related table name
-  const fkLookup = new Map<string, string>();
+  // Build FK lookup: "table.column" -> reference details
+  const fkLookup = new Map<string, ReferenceModel>();
   for (const ref of schema.references) {
-    fkLookup.set(`${ref.fromTable}.${ref.fromColumn}`, ref.toTable);
+    fkLookup.set(`${ref.fromTable}.${ref.fromColumn}`, ref);
   }
 
   const sortedTables = [...schema.tables].sort((a, b) =>
@@ -33,12 +33,12 @@ export function generateMarkdown(schema: SchemaModel, options?: MdGeneratorOptio
 
 function generateTableSection(
   table: TableModel,
-  fkLookup: Map<string, string>,
+  fkLookup: Map<string, ReferenceModel>,
   options?: MdGeneratorOptions,
 ): string {
   const lines: string[] = [];
 
-  lines.push(`### \`${table.name}\``);
+  lines.push(`### ${formatInlineCode(table.name)}`);
 
   if (options?.includeComments && table.comment) {
     lines.push('');
@@ -68,7 +68,9 @@ function generateTableSection(
       const relation = vf.relatedCollection
         ? `${vf.kind.toUpperCase()} → ${vf.relatedCollection}`
         : vf.kind.toUpperCase();
-      lines.push(`| \`${vf.name}\` | virtual | -- | ${relation} | -- |`);
+      lines.push(
+        `| ${formatInlineCode(vf.name)} | virtual | -- | ${escapeMarkdownTableCell(relation)} | -- |`,
+      );
     }
   }
 
@@ -78,7 +80,7 @@ function generateTableSection(
 function generateColumnRow(
   col: ColumnModel,
   tableName: string,
-  fkLookup: Map<string, string>,
+  fkLookup: Map<string, ReferenceModel>,
   options?: MdGeneratorOptions,
 ): string {
   const required = !col.isNullable ? 'Yes' : 'No';
@@ -90,9 +92,11 @@ function generateColumnRow(
     relation = 'Primary key';
     settingsParts.push('Auto-generated');
   } else {
-    const relatedTable = fkLookup.get(`${tableName}.${col.name}`);
-    if (relatedTable) {
-      relation = `M2O to ${relatedTable}`;
+    const reference = fkLookup.get(`${tableName}.${col.name}`);
+    if (reference) {
+      relation = reference.relation === '-'
+        ? `O2O to ${reference.toTable}`
+        : `M2O to ${reference.toTable}`;
       settingsParts.push('Foreign Key');
     }
   }
@@ -107,5 +111,26 @@ function generateColumnRow(
 
   const settings = settingsParts.length > 0 ? settingsParts.join('; ') : '--';
 
-  return `| \`${col.name}\` | ${col.type} | ${required} | ${relation} | ${settings} |`;
+  return `| ${formatInlineCode(col.name)} | ${escapeMarkdownTableCell(col.type)} | ${required} | ${escapeMarkdownTableCell(relation)} | ${escapeMarkdownTableCell(settings)} |`;
+}
+
+function escapeMarkdownTableCell(value: string): string {
+  return value
+    .replace(/\r/g, '')
+    .replace(/\n/g, '<br>')
+    .replace(/\|/g, '\\|');
+}
+
+function formatInlineCode(value: string): string {
+  const sanitized = escapeMarkdownTableCell(value);
+  const backtickRuns = sanitized.match(/`+/g);
+  const fenceLength = backtickRuns
+    ? Math.max(...backtickRuns.map((run) => run.length)) + 1
+    : 1;
+  const fence = '`'.repeat(fenceLength);
+  const padded = sanitized.startsWith('`') || sanitized.endsWith('`')
+    ? ` ${sanitized} `
+    : sanitized;
+
+  return `${fence}${padded}${fence}`;
 }

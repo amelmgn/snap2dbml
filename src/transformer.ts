@@ -214,8 +214,17 @@ function resolveRelationships(
 ): { references: ReferenceModel[]; warnings: ConversionWarning[] } {
   const references: ReferenceModel[] = [];
   const warnings: ConversionWarning[] = [];
-  // Track M2M refs to avoid duplicates (each M2M pair generates two relations)
-  const seenM2MRefs = new Set<string>();
+  const seenReferenceKeys = new Set<string>();
+
+  function addReference(reference: ReferenceModel): void {
+    const key = `${reference.fromTable}.${reference.fromColumn}${reference.relation}${reference.toTable}.${reference.toColumn}`;
+    if (seenReferenceKeys.has(key)) {
+      return;
+    }
+
+    seenReferenceKeys.add(key);
+    references.push(reference);
+  }
 
   for (const rel of relations) {
     if (!rel.meta) {
@@ -268,17 +277,13 @@ function resolveRelationships(
       // Create reference: junction.FK > related.PK
       const relatedPK = findPrimaryKey(tables, relatedTable);
       if (relatedPK) {
-        const refKey = `${junctionTable}.${junctionFK}>${relatedTable}.${relatedPK}`;
-        if (!seenM2MRefs.has(refKey)) {
-          seenM2MRefs.add(refKey);
-          references.push({
-            fromTable: junctionTable,
-            fromColumn: junctionFK,
-            toTable: relatedTable,
-            toColumn: relatedPK,
-            relation: '>',
-          });
-        }
+        addReference({
+          fromTable: junctionTable,
+          fromColumn: junctionFK,
+          toTable: relatedTable,
+          toColumn: relatedPK,
+          relation: '>',
+        });
       }
       continue;
     }
@@ -319,20 +324,24 @@ function resolveRelationships(
       continue;
     }
 
-    // M2O or O2O: many_collection.many_field > one_collection.PK
+    // M2O or O2O: many_collection.many_field [relation] one_collection.PK
     const onePK = findPrimaryKey(tables, meta.one_collection);
     if (onePK) {
-      references.push({
+      addReference({
         fromTable: meta.many_collection,
         fromColumn: meta.many_field,
         toTable: meta.one_collection,
         toColumn: onePK,
-        relation: '>',
+        relation: isOneToOneRelation(meta) ? '-' : '>',
       });
     }
   }
 
   return { references, warnings };
+}
+
+function isOneToOneRelation(meta: NonNullable<DirectusRelation['meta']>): boolean {
+  return meta.one_field !== null && meta.one_field !== undefined;
 }
 
 /** Detect circular references in the relationship graph using DFS */

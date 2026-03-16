@@ -110,6 +110,24 @@ describe('parseSnapshot', () => {
     const result = parseSnapshot(input);
     expect(result.collections).toHaveLength(0);
   });
+
+  it('should enforce maxDepth for parsed objects', () => {
+    const input = {
+      version: 1,
+      directus: '10.10.0',
+      collections: [],
+      fields: [],
+      relations: [],
+      extra: { level1: { level2: { tooDeep: true } } },
+    };
+
+    expect(() => parseSnapshot(input, { maxDepth: 3 })).toThrow(/maximum nesting depth/);
+  });
+
+  it('should reject invalid maxDepth values', () => {
+    const input = loadFixtureJSON('basic.json');
+    expect(() => parseSnapshot(input, { maxDepth: 0 })).toThrow(/positive integer/);
+  });
 });
 
 describe('parseSnapshotString', () => {
@@ -145,5 +163,18 @@ describe('parseSnapshotString', () => {
 
   it('should throw for JSON null', () => {
     expect(() => parseSnapshotString('null')).toThrow(InvalidSnapshotError);
+  });
+
+  it('should enforce maxDepth for JSON strings', () => {
+    const json = JSON.stringify({
+      version: 1,
+      directus: '10.10.0',
+      collections: [],
+      fields: [],
+      relations: [],
+      extra: { level1: { level2: { tooDeep: true } } },
+    });
+
+    expect(() => parseSnapshotString(json, { maxDepth: 3 })).toThrow(/maximum nesting depth/);
   });
 });

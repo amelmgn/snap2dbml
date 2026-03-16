@@ -1,11 +1,20 @@
 import { createServer } from 'node:http';
-import type { IncomingMessage, ServerResponse } from 'node:http';
-import { convertSnapshotWithStats, convertSnapshotToMarkdown } from './index.js';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { buildConversionArtifacts } from './conversion.js';
 import type { ConvertOptions, DirectusSnapshot } from './types.js';
 
-const PORT = parseInt(process.env.PORT ?? '3000', 10);
-const API_KEY = process.env.API_KEY ?? '';
-const MAX_BODY_BYTES = 52_428_800; // 50 MB
+const DEFAULT_PORT = parseInt(process.env.PORT ?? '3000', 10);
+const DEFAULT_API_KEY = process.env.API_KEY ?? '';
+const DEFAULT_MAX_BODY_BYTES = 52_428_800; // 50 MB
+
+export interface ServerConfig {
+  port?: number;
+  apiKey?: string;
+  maxBodyBytes?: number;
+  logger?: Pick<NodeJS.WritableStream, 'write'>;
+}
 
 interface ConvertRequest {
   snapshot: DirectusSnapshot;
@@ -13,23 +22,60 @@ interface ConvertRequest {
   generateMarkdown?: boolean;
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
+function readBody(req: IncomingMessage, maxBodyBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
+    let settled = false;
 
-    req.on('data', (chunk: Buffer) => {
-      total += chunk.length;
-      if (total > MAX_BODY_BYTES) {
-        req.destroy();
-        reject(new Error('Request body too large'));
+    const cleanup = (): void => {
+      req.off('data', onData);
+      req.off('end', onEnd);
+      req.off('error', onError);
+    };
+
+    const fail = (error: Error): void => {
+      if (settled) {
         return;
       }
-      chunks.push(chunk);
-    });
 
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
-    req.on('error', reject);
+      settled = true;
+      cleanup();
+      req.resume();
+      reject(error);
+    };
+
+    const onData = (chunk: Buffer): void => {
+      if (settled) {
+        return;
+      }
+
+      total += chunk.length;
+      if (total > maxBodyBytes) {
+        fail(new Error('Request body too large'));
+        return;
+      }
+
+      chunks.push(chunk);
+    };
+
+    const onEnd = (): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      resolve(Buffer.concat(chunks).toString('utf-8'));
+    };
+
+    const onError = (error: Error): void => {
+      fail(error);
+    };
+
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
   });
 }
 
@@ -42,70 +88,90 @@ function send(res: ServerResponse, status: number, body: unknown): void {
   res.end(json);
 }
 
-const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-  // Health check — no auth required
-  if (req.method === 'GET' && req.url === '/health') {
-    return send(res, 200, { status: 'ok' });
-  }
+export function createAppServer(config: ServerConfig = {}): Server {
+  const apiKey = config.apiKey ?? DEFAULT_API_KEY;
+  const maxBodyBytes = config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
 
-  // Auth
-  if (API_KEY) {
-    const provided = req.headers['x-api-key'];
-    if (provided !== API_KEY) {
-      return send(res, 401, { error: 'Unauthorized' });
-    }
-  }
-
-  if (req.method !== 'POST' || req.url !== '/convert') {
-    return send(res, 404, { error: 'Not Found' });
-  }
-
-  let rawBody: string;
-  try {
-    rawBody = await readBody(req);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to read request body';
-    return send(res, 413, { error: message });
-  }
-
-  let body: ConvertRequest;
-  try {
-    body = JSON.parse(rawBody) as ConvertRequest;
-  } catch {
-    return send(res, 400, { error: 'Invalid JSON' });
-  }
-
-  if (!body.snapshot || typeof body.snapshot !== 'object') {
-    return send(res, 400, { error: 'Missing required field: snapshot' });
-  }
-
-  const options: ConvertOptions = {
-    suppressWarnings: true, // warnings are returned in the response body
-    ...body.options,
-  };
-
-  try {
-    const dbmlResult = convertSnapshotWithStats(body.snapshot, options);
-
-    let md: string | null = null;
-    if (body.generateMarkdown) {
-      const mdResult = convertSnapshotToMarkdown(body.snapshot, options);
-      md = mdResult.markdown;
+  return createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // Health check — no auth required
+    if (req.method === 'GET' && req.url === '/health') {
+      return send(res, 200, { status: 'ok' });
     }
 
-    return send(res, 200, {
-      dbml: dbmlResult.dbml,
-      md,
-      warnings: dbmlResult.warnings,
-      stats: dbmlResult.stats,
-      metadata: dbmlResult.metadata,
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Conversion failed';
-    return send(res, 422, { error: message });
-  }
-});
+    // Auth
+    if (apiKey) {
+      const provided = req.headers['x-api-key'];
+      if (provided !== apiKey) {
+        return send(res, 401, { error: 'Unauthorized' });
+      }
+    }
 
-server.listen(PORT, () => {
-  process.stderr.write(`snap2dbml server listening on port ${PORT}\n`);
-});
+    if (req.method !== 'POST' || req.url !== '/convert') {
+      return send(res, 404, { error: 'Not Found' });
+    }
+
+    let rawBody: string;
+    try {
+      rawBody = await readBody(req, maxBodyBytes);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to read request body';
+      return send(res, 413, { error: message });
+    }
+
+    let body: ConvertRequest;
+    try {
+      body = JSON.parse(rawBody) as ConvertRequest;
+    } catch {
+      return send(res, 400, { error: 'Invalid JSON' });
+    }
+
+    if (!body.snapshot || typeof body.snapshot !== 'object') {
+      return send(res, 400, { error: 'Missing required field: snapshot' });
+    }
+
+    const options: ConvertOptions = {
+      suppressWarnings: true, // warnings are returned in the response body
+      ...body.options,
+    };
+
+    try {
+      const result = buildConversionArtifacts(
+        body.snapshot,
+        options,
+        body.generateMarkdown ?? false,
+      );
+
+      return send(res, 200, {
+        dbml: result.dbml,
+        md: result.markdown ?? null,
+        warnings: result.warnings,
+        stats: result.stats,
+        metadata: result.metadata,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Conversion failed';
+      return send(res, 422, { error: message });
+    }
+  });
+}
+
+export function startServer(config: ServerConfig = {}): Server {
+  const server = createAppServer(config);
+  const port = config.port ?? DEFAULT_PORT;
+  const logger = config.logger ?? process.stderr;
+
+  server.listen(port, () => {
+    logger.write(`snap2dbml server listening on port ${port}\n`);
+  });
+
+  return server;
+}
+
+function isMainModule(): boolean {
+  return process.argv[1] !== undefined
+    && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+}
+
+if (isMainModule()) {
+  startServer();
+}

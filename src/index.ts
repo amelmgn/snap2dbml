@@ -1,7 +1,8 @@
-import { parseSnapshot, parseSnapshotString } from './parser.js';
-import { transformSnapshot } from './transformer.js';
-import { generateDBML } from './generator.js';
-import { generateMarkdown } from './md-generator.js';
+import { parseSnapshotString } from './parser.js';
+import {
+  buildConversionArtifacts,
+  buildConversionArtifactsFromParsedSnapshot,
+} from './conversion.js';
 import type {
   DirectusSnapshot,
   ConvertOptions,
@@ -9,32 +10,13 @@ import type {
   MarkdownConvertResult,
 } from './types.js';
 
-const VERSION = '1.0.0';
-
 /**
  * Convert a parsed Directus snapshot object to a DBML string.
  */
 export function convertSnapshot(snapshot: DirectusSnapshot, options?: ConvertOptions): string {
-  const parsed = parseSnapshot(snapshot, {
-    maxSizeBytes: options?.maxSizeBytes,
-    maxDepth: options?.maxDepth,
-  });
-
-  const transformResult = transformSnapshot(parsed, {
-    includeSystem: options?.includeSystem,
-    includeComments: options?.includeComments,
-    failOnCircularReference: options?.failOnCircularReference,
-  });
-
-  if (!options?.suppressWarnings) {
-    for (const w of transformResult.warnings) {
-      process.stderr.write(`snap2dbml warning: [${w.code}] ${w.message}\n`);
-    }
-  }
-
-  return generateDBML(transformResult.schema, {
-    includeComments: options?.includeComments,
-  });
+  const result = buildConversionArtifacts(snapshot, options);
+  emitWarnings(result.warnings, options?.suppressWarnings);
+  return result.dbml;
 }
 
 /**
@@ -46,7 +28,9 @@ export function convertSnapshotString(json: string, options?: ConvertOptions): s
     maxDepth: options?.maxDepth,
   });
 
-  return convertSnapshot(parsed, options);
+  const result = buildConversionArtifactsFromParsedSnapshot(parsed, options);
+  emitWarnings(result.warnings, options?.suppressWarnings);
+  return result.dbml;
 }
 
 /**
@@ -56,48 +40,13 @@ export function convertSnapshotToMarkdown(
   snapshot: DirectusSnapshot,
   options?: ConvertOptions,
 ): MarkdownConvertResult {
-  const startTime = performance.now();
-
-  const parsed = parseSnapshot(snapshot, {
-    maxSizeBytes: options?.maxSizeBytes,
-    maxDepth: options?.maxDepth,
-  });
-
-  const transformResult = transformSnapshot(parsed, {
-    includeSystem: options?.includeSystem,
-    includeComments: options?.includeComments,
-    failOnCircularReference: options?.failOnCircularReference,
-  });
-
-  const markdown = generateMarkdown(transformResult.schema, {
-    includeComments: options?.includeComments,
-  });
-
-  const durationMs = performance.now() - startTime;
-
-  let fieldsProcessed = 0;
-  for (const table of transformResult.schema.tables) {
-    fieldsProcessed += table.columns.length;
-  }
+  const result = buildConversionArtifacts(snapshot, options, true);
 
   return {
-    markdown,
-    warnings: transformResult.warnings,
-    stats: {
-      tablesProcessed: transformResult.schema.tables.length,
-      tablesExcluded: transformResult.tablesExcluded,
-      fieldsProcessed,
-      fieldsSkipped: transformResult.fieldsSkipped,
-      relationsProcessed: transformResult.schema.references.length,
-      circularReferences: transformResult.circularReferences.length,
-      durationMs,
-    },
-    metadata: {
-      directusVersion: transformResult.schema.metadata.directusVersion,
-      snapshotVersion: transformResult.schema.metadata.snapshotVersion,
-      generatedAt: new Date().toISOString(),
-      snap2dbmlVersion: VERSION,
-    },
+    markdown: result.markdown!,
+    warnings: result.warnings,
+    stats: result.stats,
+    metadata: result.metadata,
   };
 }
 
@@ -108,50 +57,27 @@ export function convertSnapshotWithStats(
   snapshot: DirectusSnapshot,
   options?: ConvertOptions,
 ): ConvertResult {
-  const startTime = performance.now();
-
-  const parsed = parseSnapshot(snapshot, {
-    maxSizeBytes: options?.maxSizeBytes,
-    maxDepth: options?.maxDepth,
-  });
-
-  const transformResult = transformSnapshot(parsed, {
-    includeSystem: options?.includeSystem,
-    includeComments: options?.includeComments,
-    failOnCircularReference: options?.failOnCircularReference,
-  });
-
-  const dbml = generateDBML(transformResult.schema, {
-    includeComments: options?.includeComments,
-  });
-
-  const durationMs = performance.now() - startTime;
-
-  // Count fields processed
-  let fieldsProcessed = 0;
-  for (const table of transformResult.schema.tables) {
-    fieldsProcessed += table.columns.length;
-  }
+  const result = buildConversionArtifacts(snapshot, options);
 
   return {
-    dbml,
-    warnings: transformResult.warnings,
-    stats: {
-      tablesProcessed: transformResult.schema.tables.length,
-      tablesExcluded: transformResult.tablesExcluded,
-      fieldsProcessed,
-      fieldsSkipped: transformResult.fieldsSkipped,
-      relationsProcessed: transformResult.schema.references.length,
-      circularReferences: transformResult.circularReferences.length,
-      durationMs,
-    },
-    metadata: {
-      directusVersion: transformResult.schema.metadata.directusVersion,
-      snapshotVersion: transformResult.schema.metadata.snapshotVersion,
-      generatedAt: new Date().toISOString(),
-      snap2dbmlVersion: VERSION,
-    },
+    dbml: result.dbml,
+    warnings: result.warnings,
+    stats: result.stats,
+    metadata: result.metadata,
   };
+}
+
+function emitWarnings(
+  warnings: ConvertResult['warnings'],
+  suppressWarnings = false,
+): void {
+  if (suppressWarnings) {
+    return;
+  }
+
+  for (const warning of warnings) {
+    process.stderr.write(`snap2dbml warning: [${warning.code}] ${warning.message}\n`);
+  }
 }
 
 // Re-export types

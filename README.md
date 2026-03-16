@@ -39,7 +39,7 @@ Edit `settings.json` to configure your input and output folders:
 |---------|-------------|
 | `inputFolder` | Folder containing your Directus snapshot JSON file. Used when no file argument is passed. |
 | `outputFolder` | Folder where generated files are written. |
-| `cleanOutput` | When `true`, deletes previous `.dbml` (and `.md` when `generateMarkdown` is enabled) files from the output folder before writing new ones. |
+| `cleanOutput` | When `true`, deletes previous timestamped `schema_*.dbml` outputs (and matching `description_*.md` files when `generateMarkdown` is enabled) from the managed `outputFolder` before writing new ones. Explicit `-o/--output` paths are never cleaned automatically. |
 | `generateMarkdown` | When `true`, also generates a Markdown collection description file alongside the DBML output. |
 
 Paths can be relative (to the working directory) or absolute.

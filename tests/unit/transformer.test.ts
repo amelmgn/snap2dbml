@@ -240,6 +240,48 @@ describe('transformSnapshot', () => {
     });
   });
 
+  describe('O2O relationships', () => {
+    it('should create O2O reference with - symbol when one_field is present', () => {
+      const snapshot: DirectusSnapshot = {
+        version: 1,
+        directus: '10.10.0',
+        collections: [
+          { collection: 'users', meta: { collection: 'users', hidden: false, singleton: false }, schema: { name: 'users' } },
+          { collection: 'profiles', meta: { collection: 'profiles', hidden: false, singleton: false }, schema: { name: 'profiles' } },
+        ],
+        fields: [
+          { collection: 'users', field: 'id', type: 'uuid', meta: { id: 1, collection: 'users', field: 'id' }, schema: { name: 'id', table: 'users', data_type: 'uuid', is_nullable: false, is_primary_key: true } },
+          { collection: 'users', field: 'profile_id', type: 'uuid', meta: { id: 2, collection: 'users', field: 'profile_id' }, schema: { name: 'profile_id', table: 'users', data_type: 'uuid', is_nullable: true, is_primary_key: false } },
+          { collection: 'profiles', field: 'id', type: 'uuid', meta: { id: 3, collection: 'profiles', field: 'id' }, schema: { name: 'id', table: 'profiles', data_type: 'uuid', is_nullable: false, is_primary_key: true } },
+        ],
+        relations: [
+          {
+            collection: 'users',
+            field: 'profile_id',
+            related_collection: 'profiles',
+            meta: {
+              many_collection: 'users',
+              many_field: 'profile_id',
+              one_collection: 'profiles',
+              one_field: 'user',
+            },
+          },
+        ],
+      };
+
+      const result = transformSnapshot(snapshot);
+
+      expect(result.schema.references).toHaveLength(1);
+      expect(result.schema.references[0]).toMatchObject({
+        fromTable: 'users',
+        fromColumn: 'profile_id',
+        toTable: 'profiles',
+        toColumn: 'id',
+        relation: '-',
+      });
+    });
+  });
+
   describe('M2M relationships', () => {
     it('should create two references from junction table', () => {
       const snapshot = loadFixture('relationships-m2m.json');
