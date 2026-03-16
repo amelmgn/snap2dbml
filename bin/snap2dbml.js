@@ -10,6 +10,7 @@ import {
   Snap2DBMLError,
   InvalidSnapshotError,
   FileTooLargeError,
+  ValidationError,
 } from '../dist/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -58,7 +59,7 @@ program
     try {
       const quiet = opts.quiet ?? false;
       const suppressWarnings = quiet || opts.suppressWarnings;
-      const maxSizeBytes = parseFloat(opts.maxSize) * 1024 * 1024;
+      const maxSizeBytes = parseMaxSizeBytes(opts.maxSize);
       const generateMd = opts.md || settings.generateMarkdown || false;
 
       // Read input — if no file given, look in settings.inputFolder
@@ -121,6 +122,7 @@ program
       // Determine output paths for DBML and Markdown
       let outputPath;
       let mdPath;
+      let managedOutputDir = null;
       if (opts.stdout) {
         outputPath = null;
         mdPath = null;
@@ -133,8 +135,8 @@ program
         }
       } else if (file && file !== '-') {
         // Default: write to outputFolder from settings (fallback: ./output)
-        const outputDir = resolve(process.cwd(), settings.outputFolder || 'output');
-        mkdirSync(outputDir, { recursive: true });
+        managedOutputDir = resolve(process.cwd(), settings.outputFolder || 'output');
+        mkdirSync(managedOutputDir, { recursive: true });
         const now = new Date();
         const ts = now.getFullYear().toString()
           + String(now.getMonth() + 1).padStart(2, '0')
@@ -143,27 +145,15 @@ program
           + String(now.getHours()).padStart(2, '0')
           + String(now.getMinutes()).padStart(2, '0')
           + String(now.getSeconds()).padStart(2, '0');
-        outputPath = resolve(outputDir, `schema_${ts}.dbml`);
+        outputPath = resolve(managedOutputDir, `schema_${ts}.dbml`);
         if (generateMd) {
-          mdPath = resolve(outputDir, `description_${ts}.md`);
+          mdPath = resolve(managedOutputDir, `description_${ts}.md`);
         }
       }
 
-      // Clean previous files from output folder if configured
-      if (outputPath && settings.cleanOutput) {
-        const outDir = dirname(outputPath);
-        if (existsSync(outDir)) {
-          for (const f of readdirSync(outDir)) {
-            const isDbml = f.endsWith('.dbml');
-            const isMd = generateMd && f.endsWith('.md');
-            if (isDbml || isMd) {
-              const fullPath = resolve(outDir, f);
-              if (fullPath !== outputPath && fullPath !== mdPath) {
-                unlinkSync(fullPath);
-              }
-            }
-          }
-        }
+      // Clean only timestamped files in the managed output folder.
+      if (outputPath && settings.cleanOutput && managedOutputDir) {
+        cleanManagedOutput(managedOutputDir, outputPath, mdPath, generateMd);
       }
 
       // Write DBML
@@ -272,6 +262,38 @@ function validateOutputPath(outputPath) {
     process.exit(1);
   }
   return resolved;
+}
+
+function parseMaxSizeBytes(rawValue) {
+  const maxSizeMb = Number(rawValue);
+  if (!Number.isFinite(maxSizeMb) || maxSizeMb <= 0) {
+    throw new ValidationError(
+      `Invalid value for --max-size: ${JSON.stringify(rawValue)}. Expected a positive number of megabytes.`,
+      'Use a positive number such as --max-size 50.',
+    );
+  }
+
+  return maxSizeMb * 1024 * 1024;
+}
+
+function cleanManagedOutput(outputDir, outputPath, mdPath, generateMd) {
+  if (!existsSync(outputDir)) {
+    return;
+  }
+
+  for (const entry of readdirSync(outputDir)) {
+    const isManagedDbml = /^schema_\d{8}_\d{6}\.dbml$/.test(entry);
+    const isManagedMd = generateMd && /^description_\d{8}_\d{6}\.md$/.test(entry);
+
+    if (!isManagedDbml && !isManagedMd) {
+      continue;
+    }
+
+    const fullPath = resolve(outputDir, entry);
+    if (fullPath !== outputPath && fullPath !== mdPath) {
+      unlinkSync(fullPath);
+    }
+  }
 }
 
 function handleError(err, quiet) {

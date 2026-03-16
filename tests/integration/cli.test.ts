@@ -1,14 +1,61 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { beforeAll, beforeEach, describe, it, expect, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, unlinkSync, existsSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { resolve } from 'node:path';
 
-const CLI = resolve(import.meta.dirname, '../../bin/snap2dbml.js');
-const FIXTURES = resolve(import.meta.dirname, '../fixtures');
+const PROJECT_ROOT = resolve(import.meta.dirname, '../..');
+const CLI = resolve(PROJECT_ROOT, 'bin/snap2dbml.js');
+const FIXTURES = resolve(PROJECT_ROOT, 'tests/fixtures');
+const pkg = JSON.parse(readFileSync(resolve(PROJECT_ROOT, 'package.json'), 'utf-8')) as {
+  version: string;
+};
 
-function run(args: string[], input?: string): { stdout: string; stderr: string; exitCode: number } {
+const tempRoot = mkdtempSync(resolve(PROJECT_ROOT, 'temp/cli-tests-'));
+const managedOutputDir = resolve(tempRoot, 'managed-output');
+const explicitOutputDir = resolve(tempRoot, 'explicit-output');
+const settingsPath = resolve(tempRoot, 'settings.json');
+
+function writeSettings(overrides = {}) {
+  writeFileSync(settingsPath, JSON.stringify({
+    outputFolder: managedOutputDir,
+    cleanOutput: false,
+    generateMarkdown: false,
+    ...overrides,
+  }), 'utf-8');
+}
+
+function emptyDir(dirPath: string): void {
+  if (!existsSync(dirPath)) {
+    return;
+  }
+
+  for (const entry of readdirSync(dirPath)) {
+    rmSync(resolve(dirPath, entry), { recursive: true, force: true });
+  }
+}
+
+function run(
+  args: string[],
+  input?: string,
+  extraEnv?: NodeJS.ProcessEnv,
+): { stdout: string; stderr: string; exitCode: number } {
   const result = spawnSync('node', [CLI, ...args], {
+    cwd: PROJECT_ROOT,
     encoding: 'utf-8',
+    env: {
+      ...process.env,
+      SNAP2DBML_SETTINGS: settingsPath,
+      ...extraEnv,
+    },
     timeout: 10000,
     input,
   });
@@ -20,12 +67,24 @@ function run(args: string[], input?: string): { stdout: string; stderr: string; 
 }
 
 describe('CLI', () => {
-  const outputFile = resolve(import.meta.dirname, 'test-output.dbml');
+  const outputFile = resolve(explicitOutputDir, 'test-output.dbml');
 
-  afterEach(() => {
+  beforeAll(() => {
+    mkdirSync(managedOutputDir, { recursive: true });
+    mkdirSync(explicitOutputDir, { recursive: true });
+  });
+
+  beforeEach(() => {
+    writeSettings();
+    emptyDir(managedOutputDir);
+    emptyDir(explicitOutputDir);
+  });
+
+  afterAll(() => {
     if (existsSync(outputFile)) {
       unlinkSync(outputFile);
     }
+    rmSync(tempRoot, { recursive: true, force: true });
   });
 
   describe('file input', () => {
@@ -68,6 +127,21 @@ describe('CLI', () => {
       expect(existsSync(outputFile)).toBe(true);
       const content = readFileSync(outputFile, 'utf-8');
       expect(content).toContain('Table posts {');
+    });
+
+    it('should not clean unrelated files when -o is used', () => {
+      writeSettings({ cleanOutput: true });
+      const keepDbml = resolve(explicitOutputDir, 'keep.dbml');
+      const keepMd = resolve(explicitOutputDir, 'keep.md');
+      writeFileSync(keepDbml, 'keep', 'utf-8');
+      writeFileSync(keepMd, 'keep', 'utf-8');
+
+      const result = run([resolve(FIXTURES, 'basic.json'), '-o', outputFile]);
+
+      expect(result.exitCode).toBe(0);
+      expect(existsSync(keepDbml)).toBe(true);
+      expect(existsSync(keepMd)).toBe(true);
+      expect(existsSync(outputFile)).toBe(true);
     });
   });
 
@@ -128,7 +202,7 @@ describe('CLI', () => {
     it('should print version and exit 0', () => {
       const result = run(['--version']);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout.trim()).toBe('1.0.0');
+      expect(result.stdout.trim()).toBe(pkg.version);
     });
   });
 
@@ -147,6 +221,33 @@ describe('CLI', () => {
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain('INVALID_SNAPSHOT');
       expect(result.stderr).toContain('Suggestion');
+    });
+
+    it('should reject invalid --max-size values with a clear error', () => {
+      const result = run([resolve(FIXTURES, 'basic.json'), '--max-size', 'nope']);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain('--max-size');
+      expect(result.stderr).toContain('positive number');
+    });
+  });
+
+  describe('clean output management', () => {
+    it('should clean only managed timestamped outputs in the configured output folder', () => {
+      writeSettings({ cleanOutput: true, generateMarkdown: true });
+      writeFileSync(resolve(managedOutputDir, 'schema_20000101_000000.dbml'), 'old schema', 'utf-8');
+      writeFileSync(resolve(managedOutputDir, 'description_20000101_000000.md'), 'old markdown', 'utf-8');
+      writeFileSync(resolve(managedOutputDir, 'notes.dbml'), 'keep me', 'utf-8');
+
+      const result = run([resolve(FIXTURES, 'basic.json')]);
+
+      expect(result.exitCode).toBe(0);
+      expect(existsSync(resolve(managedOutputDir, 'schema_20000101_000000.dbml'))).toBe(false);
+      expect(existsSync(resolve(managedOutputDir, 'description_20000101_000000.md'))).toBe(false);
+      expect(existsSync(resolve(managedOutputDir, 'notes.dbml'))).toBe(true);
+
+      const outputEntries = readdirSync(managedOutputDir);
+      expect(outputEntries.some((entry) => /^schema_\d{8}_\d{6}\.dbml$/.test(entry))).toBe(true);
+      expect(outputEntries.some((entry) => /^description_\d{8}_\d{6}\.md$/.test(entry))).toBe(true);
     });
   });
 });
