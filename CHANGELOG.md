@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-03-17
+
+### Added
+- **`sync` command** (`snap2dbml sync`): Fetches a Directus snapshot, converts it to DBML/Markdown, and pushes all changes to GitHub in a single commit — no n8n or external orchestrator required.
+- **Single-commit GitHub push** via the Git Data API (trees + blobs): replaces the old 5-commit n8n pattern (update snapshot.json + create .dbml + create .md + delete old .dbml + delete old .md) with one atomic commit per sync run.
+- **Multi-target support**: `sync.json` contains an array of independent sync targets, each with its own Directus instance, GitHub repository, cron schedule, and optional Telegram notification.
+- **Built-in cron scheduler** in server mode: set `SYNC_CONFIG=/path/to/sync.json` to auto-start the scheduler on server startup. No external cron daemon or n8n needed.
+- **`SYNC_CONFIG` environment variable**: server reads this path on startup and registers scheduled jobs for all configured sync targets.
+- **`--name` flag for `sync`**: run a specific named target (`snap2dbml sync --name relian`) instead of all targets.
+- **Environment variable interpolation** in `sync.json`: `${VAR_NAME}` placeholders are replaced from `process.env` at load time, keeping secrets out of config files.
+- **Fetch timeouts** (30 s, `AbortSignal`): all outbound HTTP calls (Directus, GitHub API, Telegram) now abort after 30 seconds instead of hanging indefinitely.
+- **Config validation**: `loadSyncConfig` validates all required fields per sync target and rejects duplicate names with clear error messages.
+- **Cron step notation** (`*/5`, `1-30/2`): the built-in cron parser now supports step expressions in addition to values, ranges, lists, and wildcards.
+- `src/sync-config.ts`: types and config loading for `sync.json`.
+- `src/github-client.ts`: GitHub Git Data API client — `listDirectory`, `createSingleCommit`.
+- `src/syncer.ts`: orchestrates one sync cycle (fetch → convert → commit → notify).
+- `src/scheduler.ts`: in-process cron scheduler (pure `setTimeout`, no new runtime deps).
+- `src/sync.ts`: barrel export for all sync modules.
+- `sync.example.json`: example configuration template.
+
+### Changed
+- `src/server.ts`: on startup, checks `SYNC_CONFIG` env var and starts the scheduler if set; calls `scheduler.stop()` on `server.close()`.
+- `tsup.config.ts`: added `src/sync.ts` as a third build entry point (`dist/sync.js`).
+- `bin/snap2dbml.js`: added `sync` subcommand (imports from `dist/sync.js`).
+
+### Fixed (code review)
+- `runAll()` in `SyncScheduler` now throws if any target failed, so the `sync` CLI exits with code `1` on partial failure (previously always exited `0`).
+- Telegram notifications now log an error on non-2xx HTTP responses instead of silently swallowing them.
+- Scheduler is stopped via `server.once('close', ...)` preventing timer leaks when the HTTP server is closed without process exit.
+
 ## [1.0.0] - 2026-03-16
 
 ### Fixed

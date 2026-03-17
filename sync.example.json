@@ -1,0 +1,42 @@
+{
+  "syncs": [
+    {
+      "name": "my-project",
+      "schedule": "0 0 * * 1-5",
+      "directus": {
+        "snapshotUrl": "https://cms.example.com/schema/snapshot?export=json",
+        "bearerToken": "${DIRECTUS_TOKEN}"
+      },
+      "github": {
+        "owner": "my-org",
+        "repo": "my-repo",
+        "branch": "main",
+        "token": "${GITHUB_TOKEN}",
+        "snapshotPath": "Directus/snapshot/snapshot.json",
+        "schemaDir": "Directus/schema"
+      },
+      "telegram": {
+        "botToken": "${TELEGRAM_BOT_TOKEN}",
+        "chatId": "YOUR_CHAT_ID"
+      },
+      "generateMarkdown": true
+    },
+    {
+      "name": "second-project",
+      "schedule": "0 1 * * 1-5",
+      "directus": {
+        "snapshotUrl": "https://cms2.example.com/schema/snapshot?export=json",
+        "bearerToken": "${DIRECTUS_TOKEN_2}"
+      },
+      "github": {
+        "owner": "my-org",
+        "repo": "second-repo",
+        "branch": "main",
+        "token": "${GITHUB_TOKEN}",
+        "snapshotPath": "Directus/snapshot/snapshot.json",
+        "schemaDir": "Directus/schema"
+      },
+      "generateMarkdown": true
+    }
+  ]
+}

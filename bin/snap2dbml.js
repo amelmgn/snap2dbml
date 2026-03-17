@@ -12,6 +12,7 @@ import {
   FileTooLargeError,
   ValidationError,
 } from '../dist/index.js';
+import { loadSyncConfig, SyncScheduler } from '../dist/sync.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(resolve(__dirname, '..', 'package.json'), 'utf-8'));
@@ -188,6 +189,33 @@ program
       }
     } catch (err) {
       handleError(err, opts.quiet);
+    }
+  });
+
+program
+  .command('sync')
+  .description('Fetch Directus snapshots and push to GitHub in a single commit')
+  .option('--config <file>', 'Path to sync config JSON', 'sync.json')
+  .option('--name <name>', 'Run only the named sync target (runs all if omitted)')
+  .action(async (opts) => {
+    let config;
+    try {
+      config = loadSyncConfig(opts.config);
+    } catch (err) {
+      process.stderr.write(`snap2dbml sync: ${err instanceof Error ? err.message : err}\n`);
+      process.exit(1);
+    }
+
+    const scheduler = new SyncScheduler(config.syncs);
+    try {
+      if (opts.name) {
+        await scheduler.runByName(opts.name);
+      } else {
+        await scheduler.runAll();
+      }
+    } catch (err) {
+      process.stderr.write(`snap2dbml sync: ${err instanceof Error ? err.message : err}\n`);
+      process.exit(1);
     }
   });
 

@@ -163,12 +163,85 @@ Response:
 | `PORT` | Port to listen on (default: `3000`) |
 | `API_KEY` | Secret for `X-API-Key` header. Leave empty to disable auth (not recommended). |
 | `GHCR_OWNER` | Your GitHub username — used by `docker-compose.yml` to pull the image from `ghcr.io`. |
+| `SYNC_CONFIG` | Path to a `sync.json` file. When set, the server auto-starts the sync scheduler on boot. |
 
-**n8n integration:**
+### Automated GitHub Sync
 
-1. **HTTP Request** → `GET /api/schema/snapshot` on your Directus instance (with Directus auth token)
-2. **HTTP Request** → `POST https://your-server/convert` with `X-API-Key` header and body `{"snapshot": {{ $json }}, "generateMarkdown": true}`
-3. Use `{{ $json.dbml }}` and `{{ $json.md }}` in subsequent nodes
+snap2dbml can automatically pull snapshots from Directus and push the converted files to GitHub — no n8n or external scheduler needed. All changes land in **a single commit** per run.
+
+**Setup:**
+
+```bash
+cp sync.example.json sync.json
+# Fill in your Directus URL, tokens, and GitHub details
+```
+
+**`sync.json` format:**
+
+```json
+{
+  "syncs": [
+    {
+      "name": "my-project",
+      "schedule": "0 0 * * 1-5",
+      "directus": {
+        "snapshotUrl": "https://cms.example.com/schema/snapshot?export=json",
+        "bearerToken": "${DIRECTUS_TOKEN}"
+      },
+      "github": {
+        "owner": "my-org",
+        "repo": "my-repo",
+        "branch": "main",
+        "token": "${GITHUB_TOKEN}",
+        "snapshotPath": "Directus/snapshot/snapshot.json",
+        "schemaDir": "Directus/schema"
+      },
+      "telegram": {
+        "botToken": "${TELEGRAM_BOT_TOKEN}",
+        "chatId": "YOUR_CHAT_ID"
+      },
+      "generateMarkdown": true
+    }
+  ]
+}
+```
+
+Values like `${DIRECTUS_TOKEN}` are substituted from environment variables at load time.
+
+**Multiple repositories** are supported — add more objects to the `syncs` array. Each target runs independently with its own schedule, credentials, and GitHub repo.
+
+**Run once manually:**
+
+```bash
+# Run all configured sync targets
+snap2dbml sync --config sync.json
+
+# Run a specific target by name
+snap2dbml sync --config sync.json --name my-project
+```
+
+**Daemon mode (Docker):**
+
+Set `SYNC_CONFIG` and the server will start the scheduler automatically:
+
+```bash
+# .env
+SYNC_CONFIG=/app/sync.json
+DIRECTUS_TOKEN=your-directus-token
+GITHUB_TOKEN=your-github-token
+```
+
+```bash
+docker compose up -d
+```
+
+Each sync run produces **one commit** containing:
+- Updated `snapshot.json`
+- New `schema_YYMMDD_HHmmss.dbml`
+- New `description_YYMMDD_HHmmss.md` (when `generateMarkdown: true`)
+- Deletion of all previous timestamped schema files
+
+**Cron expressions** support values, ranges (`1-5`), wildcards (`*`), lists (`1,3,5`), and steps (`*/15`, `8-17/2`). Day-of-month and month fields are accepted but ignored — scheduling is based on minute, hour, and day-of-week only.
 
 ## CLI Options
 
@@ -271,6 +344,7 @@ With `--md` (or `generateMarkdown: true` in settings), snap2dbml additionally ge
 - **M2M junction tables** with metadata columns
 - **Markdown output** — generates a human-readable `.md` file with per-collection field tables (Field, Type, Required, Relation, Settings) alongside DBML via `--md` or `generateMarkdown` in settings
 - **HTTP backend service** — stateless REST API for use with n8n, CI/CD pipelines, or any HTTP client; deployable via Docker
+- **Automated GitHub sync** — built-in `sync` command and daemon mode: fetches snapshot from Directus, converts, and pushes all changes in **a single commit** on a cron schedule; supports multiple independent repositories
 - **Deterministic output** — byte-for-byte identical DBML for the same input, suitable for diffing and CI/CD
 - **Circular reference detection** with optional fail-on-circular mode
 - **System collection filtering** — excludes `directus_*` tables by default
@@ -327,6 +401,9 @@ JSON Input → Parser → Transformer → DBML Generator → DBML Output
                                  ↘ MD Generator  → Markdown Output (optional)
 
 HTTP POST /convert → [same pipeline] → JSON response { dbml, md }
+
+snap2dbml sync → Directus API → [same pipeline] → GitHub API (single commit)
+                                                 ↘ Telegram notification (optional)
 ```
 
 1. **Parser** — validates structure, enforces size/depth limits, checks Directus version compatibility
@@ -334,6 +411,7 @@ HTTP POST /convert → [same pipeline] → JSON response { dbml, md }
 3. **DBML Generator** — produces sorted, deterministic DBML with proper escaping
 4. **MD Generator** — produces a Markdown document with per-collection field tables (enabled via `--md`, `generateMarkdown` setting, or `generateMarkdown: true` in HTTP request)
 5. **HTTP Server** — stateless Node.js HTTP server wrapping the same pipeline; authenticated via `X-API-Key` header
+6. **Sync Engine** — fetches snapshot from Directus, converts, builds a single GitHub commit (Git Data API), optionally notifies via Telegram; scheduled via built-in cron or triggered manually
 
 ## Performance
 

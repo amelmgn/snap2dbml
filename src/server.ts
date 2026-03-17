@@ -3,6 +3,8 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildConversionArtifacts } from './conversion.js';
+import { loadSyncConfig } from './sync-config.js';
+import { SyncScheduler } from './scheduler.js';
 import type { ConvertOptions, DirectusSnapshot } from './types.js';
 
 const DEFAULT_PORT = parseInt(process.env.PORT ?? '3000', 10);
@@ -162,6 +164,20 @@ export function startServer(config: ServerConfig = {}): Server {
 
   server.listen(port, () => {
     logger.write(`snap2dbml server listening on port ${port}\n`);
+
+    const syncConfigPath = process.env.SYNC_CONFIG;
+    if (syncConfigPath) {
+      try {
+        const syncConfig = loadSyncConfig(syncConfigPath);
+        const scheduler = new SyncScheduler(syncConfig.syncs, logger);
+        scheduler.start();
+        server.once('close', () => scheduler.stop());
+      } catch (err) {
+        logger.write(
+          `snap2dbml: Failed to start scheduler: ${err instanceof Error ? err.message : err}\n`,
+        );
+      }
+    }
   });
 
   return server;
