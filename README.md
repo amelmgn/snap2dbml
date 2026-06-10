@@ -131,7 +131,19 @@ cp .env.example .env
 docker compose pull && docker compose up -d
 ```
 
-The image is built and pushed automatically to `ghcr.io` on every push to the `stage` branch via GitHub Actions. No source code needed on the server.
+Images are built and pushed to `ghcr.io` by GitHub Actions on every push to the `stage` and `prod` branches. Each push produces two tags: the branch name (`:stage` / `:prod`) and an immutable `sha-<short>` tag. A `latest` tag is intentionally never published — `docker-compose.yml` is pinned to `:prod` (override via `IMAGE_TAG` in `.env`, e.g. `IMAGE_TAG=sha-d8cf9b3` for fully deterministic deploys), so pulling can never accidentally pick up a staging image. No source code needed on the server.
+
+**Staging — run alongside production on the same host:**
+
+```bash
+cp .env.example .env.stage
+# Set a separate API_KEY in .env.stage; if testing sync, point SYNC_CONFIG at a sandbox sync.json
+docker compose -f docker-compose.stage.yml -p snap2dbml-stage pull
+docker compose -f docker-compose.stage.yml -p snap2dbml-stage up -d
+curl http://localhost:3001/health
+```
+
+The staging container uses the `:stage` image and port `3001`; the separate compose project name (`-p snap2dbml-stage`) guarantees `up`/`down` never touch the production container. When testing the sync engine, its `sync.json` must target a test repository (or a separate branch/directory) — never the paths managed by production.
 
 **Endpoints:**
 
@@ -183,6 +195,8 @@ Response:
 | `PORT` | Port to listen on (default: `3000`) |
 | `API_KEY` | Secret for `X-API-Key` header. Leave empty to disable auth (not recommended). |
 | `GHCR_OWNER` | Your GitHub username — used by `docker-compose.yml` to pull the image from `ghcr.io`. |
+| `IMAGE_TAG` | Image tag for the production container (default: `prod`). Pin to an immutable `sha-*` tag for deterministic deploys. |
+| `STAGE_IMAGE_TAG` | Image tag for the staging container in `docker-compose.stage.yml` (default: `stage`). |
 | `SYNC_CONFIG` | Path to a `sync.json` file. When set, the server auto-starts the sync scheduler on boot. |
 
 ### Automated GitHub Sync

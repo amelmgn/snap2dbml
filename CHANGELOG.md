@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`docker-compose.stage.yml`**: staging container that runs alongside production on the same host (`:stage` image, port 3001, separate compose project name and `.env.stage`), for validating changes without touching the prod instance.
+
+### Changed
+- **Production compose pinned to an explicit image tag**: `docker-compose.yml` now uses `:prod` by default (`IMAGE_TAG` env override for immutable `sha-*` pinning) instead of `:latest`, which CI never actually published — `docker compose pull` could silently resolve to a stale or wrong image.
+- **CI image tags documented and made explicit**: `latest=false` in the publish workflow; every push to `stage`/`prod` produces the branch tag plus an immutable `sha-<short>` tag.
+
 ### Fixed
 - **O2O misclassification**: relations were marked one-to-one (`-`) whenever `meta.one_field` was set, but `one_field` only indicates a reverse O2M alias field — 23 of 107 ordinary M2O relations in a real snapshot were rendered as O2O. Detection is now based on a unique (or primary key) constraint on the FK column (`schema.is_unique` / `is_primary_key`).
 - **Default value escaping**: string defaults containing single quotes, backslashes, or newlines are now escaped before embedding in DBML; object defaults are serialized as JSON instead of `[object Object]`.

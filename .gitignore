@@ -5,7 +5,10 @@ output/
 product_docs/
 temp/
 settings.json
+sync.json
+sync.stage.json
 *.dbml
 .DS_Store
 .env
+.env.stage
 .claude/

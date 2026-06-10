@@ -1,0 +1,26 @@
+# Staging instance — runs alongside production on the same host.
+#
+# Usage (separate project name so `up`/`down` never touch the prod container):
+#   cp .env.example .env.stage   # set a separate API_KEY; point SYNC_CONFIG at a sandbox sync.json
+#   docker compose -f docker-compose.stage.yml -p snap2dbml-stage pull
+#   docker compose -f docker-compose.stage.yml -p snap2dbml-stage up -d
+#   curl http://localhost:3001/health
+#
+# IMPORTANT: the staging sync.json must point at a test repository (or a
+# separate branch/directory) — never at the paths managed by production.
+services:
+  snap2dbml-stage:
+    image: ghcr.io/${GHCR_OWNER}/snap2dbml:${STAGE_IMAGE_TAG:-stage}
+    container_name: snap2dbml-stage
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    env_file:
+      - .env.stage
+    environment:
+      # The host port is mapped above; the server must keep listening on 3000
+      # inside the container regardless of what .env.stage says.
+      PORT: 3000
+    # Uncomment when testing the built-in sync scheduler:
+    # volumes:
+    #   - ./sync.stage.json:/app/sync.json:ro
