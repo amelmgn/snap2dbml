@@ -1,15 +1,33 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildConversionArtifacts } from './conversion.js';
+import { Snap2DBMLError } from './errors.js';
 import { loadSyncConfig } from './sync-config.js';
 import { SyncScheduler } from './scheduler.js';
 import type { ConvertOptions, DirectusSnapshot } from './types.js';
 
-const DEFAULT_PORT = parseInt(process.env.PORT ?? '3000', 10);
 const DEFAULT_API_KEY = process.env.API_KEY ?? '';
 const DEFAULT_MAX_BODY_BYTES = 52_428_800; // 50 MB
+
+function resolvePort(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return 3000;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error(`Invalid PORT: "${raw}" (expected an integer between 0 and 65535)`);
+  }
+  return port;
+}
+
+function isApiKeyValid(provided: string | string[] | undefined, expected: string): boolean {
+  if (typeof provided !== 'string') return false;
+  const providedBuf = Buffer.from(provided);
+  const expectedBuf = Buffer.from(expected);
+  if (providedBuf.length !== expectedBuf.length) return false;
+  return timingSafeEqual(providedBuf, expectedBuf);
+}
 
 export interface ServerConfig {
   port?: number;
@@ -102,8 +120,7 @@ export function createAppServer(config: ServerConfig = {}): Server {
 
     // Auth
     if (apiKey) {
-      const provided = req.headers['x-api-key'];
-      if (provided !== apiKey) {
+      if (!isApiKeyValid(req.headers['x-api-key'], apiKey)) {
         return send(res, 401, { error: 'Unauthorized' });
       }
     }
@@ -151,15 +168,21 @@ export function createAppServer(config: ServerConfig = {}): Server {
         metadata: result.metadata,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Conversion failed';
-      return send(res, 422, { error: message });
+      // Known conversion errors are the client's fault; anything else is an internal
+      // error and must not leak its message to the client
+      if (err instanceof Snap2DBMLError) {
+        return send(res, 422, { error: err.message });
+      }
+      const logger = config.logger ?? process.stderr;
+      logger.write(`snap2dbml: Internal error: ${err instanceof Error ? (err.stack ?? err.message) : err}\n`);
+      return send(res, 500, { error: 'Internal server error' });
     }
   });
 }
 
 export function startServer(config: ServerConfig = {}): Server {
   const server = createAppServer(config);
-  const port = config.port ?? DEFAULT_PORT;
+  const port = config.port ?? resolvePort(process.env.PORT);
   const logger = config.logger ?? process.stderr;
 
   server.listen(port, () => {

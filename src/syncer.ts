@@ -12,14 +12,15 @@ function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+// UTC, matching the commit message timestamp; same format as the CLI (schema_YYYYMMDD_HHMMSS)
 function formatTimestamp(date: Date): string {
-  const yy = date.getFullYear().toString().slice(2);
-  const MM = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  const HH = String(date.getHours()).padStart(2, '0');
-  const mm = String(date.getMinutes()).padStart(2, '0');
-  const ss = String(date.getSeconds()).padStart(2, '0');
-  return `${yy}${MM}${dd}_${HH}${mm}${ss}`;
+  const yyyy = String(date.getUTCFullYear());
+  const MM = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(date.getUTCDate()).padStart(2, '0');
+  const HH = String(date.getUTCHours()).padStart(2, '0');
+  const mm = String(date.getUTCMinutes()).padStart(2, '0');
+  const ss = String(date.getUTCSeconds()).padStart(2, '0');
+  return `${yyyy}${MM}${dd}_${HH}${mm}${ss}`;
 }
 
 async function fetchDirectusSnapshot(url: string, bearerToken: string): Promise<DirectusSnapshot> {
@@ -78,20 +79,28 @@ export async function runSync(
 
   logger.write(`[sync:${name}] Listing existing schema files in ${github.schemaDir}...\n`);
   const existingEntries = await listDirectory(repo, github.schemaDir);
+  // Match both current (YYYYMMDD) and legacy (YYMMDD) timestamp formats
   const oldSchemaPaths = existingEntries
-    .filter(e => e.type === 'file' && /^(schema|description)_\d{6}_\d{6}\.(dbml|md)$/.test(e.name))
+    .filter(e => e.type === 'file' && /^(schema|description)_(\d{6}|\d{8})_\d{6}\.(dbml|md)$/.test(e.name))
     .map(e => e.path);
 
   const now = new Date();
   const ts = formatTimestamp(now);
 
-  const changes: FileChange[] = [
+  const newFiles: FileChange[] = [
     { path: github.snapshotPath, content: snapshotJson },
     { path: `${github.schemaDir}/schema_${ts}.dbml`, content: result.dbml },
     ...(generateMarkdown && result.markdown
       ? [{ path: `${github.schemaDir}/description_${ts}.md`, content: result.markdown }]
       : []),
-    ...oldSchemaPaths.map(p => ({ path: p, content: null })),
+  ];
+
+  // Never delete a path we are about to write (e.g. two runs within the same second) —
+  // duplicate paths in one Git tree are rejected by the GitHub API
+  const newPaths = new Set(newFiles.map(f => f.path));
+  const changes: FileChange[] = [
+    ...newFiles,
+    ...oldSchemaPaths.filter(p => !newPaths.has(p)).map(p => ({ path: p, content: null })),
   ];
 
   const nowIso = now.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';

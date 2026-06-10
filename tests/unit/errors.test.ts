@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   Snap2DBMLError,
   InvalidSnapshotError,
-  UnsupportedFieldError,
   CircularReferenceError,
   FileTooLargeError,
   ValidationError,
@@ -44,31 +43,6 @@ describe('Error Classes', () => {
     it('should set name to class name', () => {
       const err = new InvalidSnapshotError('test');
       expect(err.name).toBe('InvalidSnapshotError');
-    });
-  });
-
-  describe('UnsupportedFieldError', () => {
-    it('should have correct code and exit code (warning only)', () => {
-      const err = new UnsupportedFieldError('myField', 'customType');
-      expect(err.code).toBe('UNSUPPORTED_FIELD_TYPE');
-      expect(err.getExitCode()).toBe(0);
-    });
-
-    it('should store field name and type', () => {
-      const err = new UnsupportedFieldError('myField', 'customType');
-      expect(err.fieldName).toBe('myField');
-      expect(err.fieldType).toBe('customType');
-    });
-
-    it('should have a descriptive message', () => {
-      const err = new UnsupportedFieldError('myField', 'customType');
-      expect(err.message).toContain('customType');
-      expect(err.message).toContain('myField');
-    });
-
-    it('should be an instance of Snap2DBMLError', () => {
-      const err = new UnsupportedFieldError('f', 't');
-      expect(err).toBeInstanceOf(Snap2DBMLError);
     });
   });
 

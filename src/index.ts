@@ -102,11 +102,14 @@ export type {
 export { generateMarkdown } from './md-generator.js';
 export type { MdGeneratorOptions } from './md-generator.js';
 
+// Re-export single-pass DBML + Markdown conversion (used by the CLI and server)
+export { buildConversionArtifacts } from './conversion.js';
+export type { ConversionArtifacts } from './conversion.js';
+
 // Re-export errors
 export {
   Snap2DBMLError,
   InvalidSnapshotError,
-  UnsupportedFieldError,
   CircularReferenceError,
   ValidationError,
   FileTooLargeError,

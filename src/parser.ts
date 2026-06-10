@@ -18,8 +18,8 @@ export function parseSnapshot(input: unknown, options?: ParserOptions): Directus
 export function parseSnapshotString(json: string, options?: ParserOptions): DirectusSnapshot {
   const maxSize = options?.maxSizeBytes ?? DEFAULT_MAX_SIZE_BYTES;
 
-  // Check size before parsing
-  const byteLength = new TextEncoder().encode(json).byteLength;
+  // Check size before parsing (Buffer.byteLength avoids copying the whole string)
+  const byteLength = Buffer.byteLength(json, 'utf-8');
   if (byteLength > maxSize) {
     throw new FileTooLargeError(byteLength, maxSize);
   }

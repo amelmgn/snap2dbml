@@ -3,45 +3,68 @@ import type { SyncTarget } from './sync-config.js';
 
 // ---- Minimal cron parser ----
 // Supports: specific values (5), wildcards (*), ranges (1-5), lists (1,3,5), steps (*/5, 1-30/2)
-// Only minute, hour, and day-of-week fields are evaluated (day-of-month and month are ignored).
+// Only minute, hour, and day-of-week fields are evaluated; day-of-month and month must be "*".
 
-function parseField(field: string, min: number, max: number): Set<number> {
+export function parseField(field: string, min: number, max: number, label: string): Set<number> {
+  const parseNum = (s: string): number => {
+    const n = Number(s);
+    if (!/^\d+$/.test(s) || !Number.isInteger(n) || n < min || n > max) {
+      throw new Error(`Invalid ${label} value "${s}" in cron field "${field}" (expected ${min}-${max})`);
+    }
+    return n;
+  };
+
   const set = new Set<number>();
   for (const part of field.split(',')) {
     // Step syntax: */5 or 1-30/2
     if (part.includes('/')) {
       const [rangeStr, stepStr] = part.split('/');
       const step = Number(stepStr);
+      if (!/^\d+$/.test(stepStr) || !Number.isInteger(step) || step < 1) {
+        throw new Error(`Invalid step "${stepStr}" in cron field "${field}" (expected a positive integer)`);
+      }
       let rangeMin = min;
       let rangeMax = max;
       if (rangeStr !== '*') {
-        const [a, b] = rangeStr.split('-').map(Number);
-        rangeMin = a;
-        rangeMax = b ?? a;
+        const [a, b] = rangeStr.split('-');
+        rangeMin = parseNum(a);
+        rangeMax = b !== undefined ? parseNum(b) : max;
       }
       for (let i = rangeMin; i <= rangeMax; i += step) set.add(i);
     } else if (part.includes('-')) {
-      const [a, b] = part.split('-').map(Number);
-      for (let i = a; i <= b; i++) set.add(i);
+      const [a, b] = part.split('-');
+      const lo = parseNum(a);
+      const hi = parseNum(b);
+      if (lo > hi) {
+        throw new Error(`Invalid range "${part}" in cron field "${field}" (start is greater than end)`);
+      }
+      for (let i = lo; i <= hi; i++) set.add(i);
     } else if (part === '*') {
       for (let i = min; i <= max; i++) set.add(i);
     } else {
-      set.add(Number(part));
+      set.add(parseNum(part));
     }
   }
   return set;
 }
 
-function getNextRunMs(expression: string): number {
+export function getNextRunMs(expression: string): number {
   const parts = expression.trim().split(/\s+/);
   if (parts.length !== 5) {
     throw new Error(`Invalid cron expression "${expression}" — expected 5 fields (minute hour dom month dow)`);
   }
-  const [minuteF, hourF, , , dowF] = parts;
-  const minutes = parseField(minuteF, 0, 59);
-  const hours = parseField(hourF, 0, 23);
-  // In JS: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
-  const daysOfWeek = parseField(dowF, 0, 6);
+  const [minuteF, hourF, domF, monthF, dowF] = parts;
+  if (domF !== '*' || monthF !== '*') {
+    throw new Error(
+      `Cron expression "${expression}" uses day-of-month/month fields, which are not supported — use "*" for both`,
+    );
+  }
+  const minutes = parseField(minuteF, 0, 59, 'minute');
+  const hours = parseField(hourF, 0, 23, 'hour');
+  // In JS: 0=Sun, 1=Mon, ..., 6=Sat. Standard cron also allows 7 for Sunday.
+  const daysOfWeek = new Set(
+    [...parseField(dowF, 0, 7, 'day-of-week')].map((d) => (d === 7 ? 0 : d)),
+  );
 
   const now = new Date();
   const candidate = new Date(now);

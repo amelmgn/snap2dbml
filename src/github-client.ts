@@ -78,18 +78,17 @@ export async function createSingleCommit(
   );
   const baseTreeSha = parentCommit.tree.sha;
 
-  // 3. Create blobs for new/updated files; mark deletions with sha: null
-  const treeItems: Array<{
-    path: string;
-    mode: string;
-    type: string;
-    sha?: string | null;
-  }> = [];
-
-  for (const change of changes) {
-    if (change.content === null) {
-      treeItems.push({ path: change.path, mode: '100644', type: 'blob', sha: null });
-    } else {
+  // 3. Create blobs for new/updated files (in parallel); mark deletions with sha: null
+  const treeItems = await Promise.all(
+    changes.map(async (change): Promise<{
+      path: string;
+      mode: string;
+      type: string;
+      sha?: string | null;
+    }> => {
+      if (change.content === null) {
+        return { path: change.path, mode: '100644', type: 'blob', sha: null };
+      }
       const blob = await ghFetch<{ sha: string }>(
         repo.token,
         `/repos/${repo.owner}/${repo.repo}/git/blobs`,
@@ -101,9 +100,9 @@ export async function createSingleCommit(
           }),
         },
       );
-      treeItems.push({ path: change.path, mode: '100644', type: 'blob', sha: blob.sha });
-    }
-  }
+      return { path: change.path, mode: '100644', type: 'blob', sha: blob.sha };
+    }),
+  );
 
   // 4. Create new tree from base + all changes
   const tree = await ghFetch<{ sha: string }>(

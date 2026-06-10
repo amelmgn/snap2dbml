@@ -100,6 +100,14 @@ const mdResult = convertSnapshotToMarkdown(snapshotObject);
 // mdResult.warnings  - conversion warnings
 // mdResult.stats     - tables/fields/relations counts, duration
 // mdResult.metadata  - Directus version, generation timestamp
+
+// DBML and Markdown in a single parse/transform pass
+import { buildConversionArtifacts } from 'snap2dbml';
+
+const artifacts = buildConversionArtifacts(snapshotObject, options, /* includeMarkdown */ true);
+// artifacts.dbml      - DBML string
+// artifacts.markdown  - Markdown string (only when includeMarkdown is true)
+// artifacts.warnings / artifacts.stats / artifacts.metadata
 ```
 
 ### HTTP Server
@@ -155,6 +163,18 @@ Response:
 ```
 
 `md` is `null` when `generateMarkdown` is omitted or `false`.
+
+**Response status codes:**
+
+| Status | Meaning |
+|--------|---------|
+| 200 | Conversion succeeded |
+| 400 | Invalid JSON body or missing `snapshot` field |
+| 401 | Missing or wrong `X-API-Key` |
+| 404 | Unknown method/path |
+| 413 | Request body exceeds the size limit (50 MB) |
+| 422 | Snapshot failed validation or conversion |
+| 500 | Internal error (details are logged server-side, not returned) |
 
 **Environment variables:**
 
@@ -237,11 +257,11 @@ docker compose up -d
 
 Each sync run produces **one commit** containing:
 - Updated `snapshot.json`
-- New `schema_YYMMDD_HHmmss.dbml`
-- New `description_YYMMDD_HHmmss.md` (when `generateMarkdown: true`)
-- Deletion of all previous timestamped schema files
+- New `schema_YYYYMMDD_HHMMSS.dbml` (UTC timestamp, matching the commit message)
+- New `description_YYYYMMDD_HHMMSS.md` (when `generateMarkdown: true`)
+- Deletion of all previous timestamped schema files (both current and legacy `YYMMDD` formats)
 
-**Cron expressions** support values, ranges (`1-5`), wildcards (`*`), lists (`1,3,5`), and steps (`*/15`, `8-17/2`). Day-of-month and month fields are accepted but ignored — scheduling is based on minute, hour, and day-of-week only.
+**Cron expressions** support values, ranges (`1-5`), wildcards (`*`), lists (`1,3,5`), and steps (`*/15`, `8-17/2`). Scheduling is based on minute, hour, and day-of-week only; day-of-month and month fields must be `*` (anything else is rejected with an error). `7` is accepted as Sunday, and invalid values (out-of-range, non-numeric, zero steps) fail fast with a descriptive error instead of silently never firing.
 
 ## CLI Options
 
@@ -340,7 +360,7 @@ With `--md` (or `generateMarkdown: true` in settings), snap2dbml additionally ge
 
 - **Directus v10.x and v11.x** snapshot support
 - **All standard field types** — uuid, string, integer, float, decimal, boolean, timestamp, json, and more
-- **Relationships** — M2O, O2M, M2M, and O2O with proper DBML `Ref:` syntax
+- **Relationships** — M2O, O2M, M2M, and O2O with proper DBML `Ref:` syntax; O2O is detected by a unique (or primary key) constraint on the FK column
 - **M2M junction tables** with metadata columns
 - **Markdown output** — generates a human-readable `.md` file with per-collection field tables (Field, Type, Required, Relation, Settings) alongside DBML via `--md` or `generateMarkdown` in settings
 - **HTTP backend service** — stateless REST API for use with n8n, CI/CD pipelines, or any HTTP client; deployable via Docker
@@ -360,7 +380,6 @@ import {
   InvalidSnapshotError,
   FileTooLargeError,
   CircularReferenceError,
-  UnsupportedFieldError,
   ValidationError,
 } from 'snap2dbml';
 ```

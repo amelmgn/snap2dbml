@@ -5,8 +5,7 @@ import { readFileSync, writeFileSync, readdirSync, unlinkSync, accessSync, statS
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  convertSnapshotWithStats,
-  convertSnapshotToMarkdown,
+  buildConversionArtifacts,
   Snap2DBMLError,
   InvalidSnapshotError,
   FileTooLargeError,
@@ -117,8 +116,8 @@ program
         suppressWarnings: true, // We handle warnings ourselves in the CLI
       };
 
-      // Always convert to DBML
-      const result = convertSnapshotWithStats(snapshot, convertOptions);
+      // Convert to DBML (and Markdown in the same pass when requested)
+      const result = buildConversionArtifacts(snapshot, convertOptions, generateMd);
 
       // Determine output paths for DBML and Markdown
       let outputPath;
@@ -167,10 +166,9 @@ program
         process.stdout.write(result.dbml);
       }
 
-      // Generate and write Markdown alongside DBML (only when writing to a file)
-      if (generateMd && mdPath) {
-        const mdResult = convertSnapshotToMarkdown(snapshot, convertOptions);
-        writeFileSync(mdPath, mdResult.markdown, 'utf-8');
+      // Write Markdown alongside DBML (only when writing to a file)
+      if (generateMd && mdPath && result.markdown !== undefined) {
+        writeFileSync(mdPath, result.markdown, 'utf-8');
         if (!quiet) {
           process.stderr.write(`Written to: ${mdPath}\n`);
         }

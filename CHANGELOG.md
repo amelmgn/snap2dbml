@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **O2O misclassification**: relations were marked one-to-one (`-`) whenever `meta.one_field` was set, but `one_field` only indicates a reverse O2M alias field — 23 of 107 ordinary M2O relations in a real snapshot were rendered as O2O. Detection is now based on a unique (or primary key) constraint on the FK column (`schema.is_unique` / `is_primary_key`).
+- **Default value escaping**: string defaults containing single quotes, backslashes, or newlines are now escaped before embedding in DBML; object defaults are serialized as JSON instead of `[object Object]`.
+- **Virtual field notes**: alias field labels in `[note: '...']` are now escaped, so quotes in field/collection names no longer break the DBML output.
+- **Cron parser hardening** (`scheduler.ts`): `*/0` no longer causes an infinite loop; `7` is accepted as Sunday (standard cron); non-numeric, out-of-range, and inverted values now throw a clear error instead of silently never matching; non-`*` day-of-month/month fields now throw instead of being silently ignored (previously `0 0 1 * *` ran daily).
+- **Alias/column name collisions**: an alias virtual field whose name matches a real column is dropped with a `DUPLICATE_VIRTUAL_FIELD` warning instead of producing duplicate column lines in the table block.
+- **Server error handling**: unexpected internal errors now return `500` with a generic message (and are logged) instead of leaking `err.message` as `422`; only `Snap2DBMLError`s map to `422`.
+- **Server hardening**: API key comparison uses `crypto.timingSafeEqual`; invalid `PORT` env values throw at startup instead of `listen(NaN)` binding a random port.
+- **Sync timestamp consistency**: sync filenames now use the same `schema_YYYYMMDD_HHMMSS` format as the CLI (was 2-digit year) and UTC (matching the commit message); cleanup matches both old and new formats.
+- **Sync same-second rerun**: paths about to be written are excluded from the deletion list, preventing duplicate-path errors from the GitHub tree API.
+
+### Changed
+- **MULTIPLE_PRIMARY_KEYS warning** is now actually emitted when a collection has more than one primary key column (the code existed but was never used).
+- **CLI single-pass conversion**: `--md` no longer parses and transforms the snapshot twice; the CLI uses the shared `buildConversionArtifacts` pipeline (now exported from the library).
+- **GitHub blobs** are created in parallel during sync commits.
+- **Circular reference detection** uses an iterative DFS, so very long reference chains cannot overflow the call stack.
+- **Size check** in `parseSnapshotString` uses `Buffer.byteLength` instead of copying the input via `TextEncoder`.
+
+### Removed
+- Dead code: unused `UnsupportedFieldError` class and `ERROR_CODES.UNSUPPORTED_VERSION` constant.
+
 ## [1.1.0] - 2026-03-17
 
 ### Added

@@ -46,6 +46,14 @@ export function transformSnapshot(
 
   const tableNameSet = new Set(filteredCollections.map((c) => c.collection));
 
+  // Columns with a unique (or primary key) constraint — used to detect true O2O relations
+  const uniqueColumns = new Set<string>();
+  for (const field of snapshot.fields) {
+    if (field.schema?.is_unique || field.schema?.is_primary_key) {
+      uniqueColumns.add(`${field.collection}.${field.field}`);
+    }
+  }
+
   // Group fields by collection (single pass)
   const fieldsByCollection = new Map<string, DirectusField[]>();
   for (const field of snapshot.fields) {
@@ -131,11 +139,36 @@ export function transformSnapshot(
       columns.push(column);
     }
 
+    const pkCount = columns.filter((c) => c.isPrimaryKey).length;
+    if (pkCount > 1) {
+      warnings.push({
+        code: WARNING_CODES.MULTIPLE_PRIMARY_KEYS,
+        message: `Collection '${col.collection}' has ${pkCount} primary key columns.`,
+        collection: col.collection,
+      });
+    }
+
+    // Drop virtual fields whose name collides with a real column (would produce duplicate
+    // column lines in the DBML table block)
+    const columnNames = new Set(columns.map((c) => c.name.toLowerCase()));
+    const safeVirtualFields = virtualFields.filter((vf) => {
+      if (columnNames.has(vf.name.toLowerCase())) {
+        warnings.push({
+          code: WARNING_CODES.DUPLICATE_VIRTUAL_FIELD,
+          message: `Alias field '${vf.name}' in collection '${col.collection}' collides with a real column, skipping virtual field.`,
+          collection: col.collection,
+          field: vf.name,
+        });
+        return false;
+      }
+      return true;
+    });
+
     const table: TableModel = {
       name: col.collection,
       columns,
       isSystem: col.collection.startsWith(SYSTEM_COLLECTION_PREFIX),
-      ...(virtualFields.length > 0 ? { virtualFields } : {}),
+      ...(safeVirtualFields.length > 0 ? { virtualFields: safeVirtualFields } : {}),
     };
 
     if (includeComments && col.meta?.note) {
@@ -150,6 +183,7 @@ export function transformSnapshot(
     snapshot.relations,
     tableNameSet,
     tables,
+    uniqueColumns,
   );
   warnings.push(...relWarnings);
 
@@ -199,18 +233,19 @@ function findPrimaryKey(tables: TableModel[], tableName: string): string | null 
 /**
  * Resolve Directus relations into DBML reference models.
  *
- * Algorithm from spec:
+ * Algorithm:
  * - If meta.junction_field exists -> M2M (create reference from junction FK to related PK)
  * - Else if meta.many_collection and meta.one_collection both exist:
- *   - If meta.one_field is null -> M2O
- *   - Else if meta.many_field is null -> O2M (skip, covered by M2O side)
- *   - Else -> O2O
+ *   - If meta.many_field is null -> O2M (skip, covered by M2O side)
+ *   - Else if the FK column has a unique (or PK) constraint -> O2O
+ *   - Else -> M2O (meta.one_field merely indicates a reverse O2M alias field)
  * - Else -> Skip (incomplete), log warning
  */
 function resolveRelationships(
   relations: DirectusRelation[],
   tableNameSet: Set<string>,
   tables: TableModel[],
+  uniqueColumns: Set<string>,
 ): { references: ReferenceModel[]; warnings: ConversionWarning[] } {
   const references: ReferenceModel[] = [];
   const warnings: ConversionWarning[] = [];
@@ -325,6 +360,9 @@ function resolveRelationships(
     }
 
     // M2O or O2O: many_collection.many_field [relation] one_collection.PK
+    // A relation is O2O only when the FK column itself is unique — meta.one_field
+    // alone just means a reverse O2M alias field exists on the "one" side.
+    const isO2O = uniqueColumns.has(`${meta.many_collection}.${meta.many_field}`);
     const onePK = findPrimaryKey(tables, meta.one_collection);
     if (onePK) {
       addReference({
@@ -332,16 +370,12 @@ function resolveRelationships(
         fromColumn: meta.many_field,
         toTable: meta.one_collection,
         toColumn: onePK,
-        relation: isOneToOneRelation(meta) ? '-' : '>',
+        relation: isO2O ? '-' : '>',
       });
     }
   }
 
   return { references, warnings };
-}
-
-function isOneToOneRelation(meta: NonNullable<DirectusRelation['meta']>): boolean {
-  return meta.one_field !== null && meta.one_field !== undefined;
 }
 
 /** Detect circular references in the relationship graph using DFS */
@@ -354,36 +388,40 @@ function detectCircularReferences(references: ReferenceModel[]): string[] {
     adjacency.get(ref.fromTable)!.push(ref.toTable);
   }
 
+  // Iterative DFS (explicit stack) so very long reference chains cannot overflow the call stack
   const cycles: string[] = [];
   const visited = new Set<string>();
   const inStack = new Set<string>();
 
-  function dfs(node: string, path: string[]): void {
-    if (inStack.has(node)) {
-      // Found a cycle
-      const cycleStart = path.indexOf(node);
-      const cycle = [...path.slice(cycleStart), node];
-      cycles.push(cycle.join(' -> '));
-      return;
-    }
-    if (visited.has(node)) return;
+  for (const root of adjacency.keys()) {
+    if (visited.has(root)) continue;
 
-    visited.add(node);
-    inStack.add(node);
-    path.push(node);
+    const path: string[] = [root];
+    const stack: Array<{ node: string; nextIndex: number }> = [{ node: root, nextIndex: 0 }];
+    visited.add(root);
+    inStack.add(root);
 
-    const neighbors = adjacency.get(node) ?? [];
-    for (const neighbor of neighbors) {
-      dfs(neighbor, path);
-    }
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const neighbors = adjacency.get(frame.node) ?? [];
 
-    path.pop();
-    inStack.delete(node);
-  }
-
-  for (const node of adjacency.keys()) {
-    if (!visited.has(node)) {
-      dfs(node, []);
+      if (frame.nextIndex < neighbors.length) {
+        const neighbor = neighbors[frame.nextIndex++];
+        if (inStack.has(neighbor)) {
+          // Found a cycle
+          const cycleStart = path.indexOf(neighbor);
+          cycles.push([...path.slice(cycleStart), neighbor].join(' -> '));
+        } else if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          inStack.add(neighbor);
+          path.push(neighbor);
+          stack.push({ node: neighbor, nextIndex: 0 });
+        }
+      } else {
+        stack.pop();
+        path.pop();
+        inStack.delete(frame.node);
+      }
     }
   }
 
@@ -397,7 +435,7 @@ function formatDefaultValue(value: unknown): string {
     if (/^\w+\(.*\)$/.test(value)) {
       return `\`${value}\``;
     }
-    return `'${value}'`;
+    return `'${escapeDefaultString(value)}'`;
   }
   if (typeof value === 'boolean') {
     return value.toString();
@@ -405,5 +443,17 @@ function formatDefaultValue(value: unknown): string {
   if (typeof value === 'number') {
     return value.toString();
   }
-  return `'${String(value)}'`;
+  if (typeof value === 'object' && value !== null) {
+    return `'${escapeDefaultString(JSON.stringify(value))}'`;
+  }
+  return `'${escapeDefaultString(String(value))}'`;
+}
+
+/** Escape a default value string for safe embedding in DBML single quotes */
+function escapeDefaultString(str: string): string {
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, ' ')
+    .replace(/\r/g, '');
 }

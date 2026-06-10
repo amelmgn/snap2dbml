@@ -70,7 +70,7 @@ function generateTable(table: TableModel, options?: GeneratorOptions): string {
       const label = vf.relatedCollection
         ? `${vf.kind} → ${vf.relatedCollection}`
         : vf.kind;
-      lines.push(`  ${vfName} virtual [note: '${label}']`);
+      lines.push(`  ${vfName} virtual [note: '${escapeString(label)}']`);
     }
   }
 
