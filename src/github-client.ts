@@ -34,20 +34,40 @@ async function ghFetch<T>(token: string, path: string, init: RequestInit = {}): 
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`GitHub API ${response.status} on ${path}: ${body}`);
+    throw new GitHubApiError(response.status, path, body);
   }
 
   return response.json() as Promise<T>;
 }
 
+export class GitHubApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly path: string,
+    readonly responseBody: string,
+  ) {
+    super(`GitHub API ${status} on ${path}: ${responseBody}`);
+    this.name = 'GitHubApiError';
+  }
+}
+
+export async function getBranchHead(repo: GitHubRepo): Promise<string> {
+  const ref = await ghFetch<{ object: { sha: string } }>(
+    repo.token,
+    `/repos/${repo.owner}/${repo.repo}/git/ref/heads/${repo.branch}`,
+  );
+  return ref.object.sha;
+}
+
 export async function listDirectory(
   repo: GitHubRepo,
   path: string,
+  ref: string = repo.branch,
 ): Promise<Array<{ name: string; path: string; type: string }>> {
   try {
     return await ghFetch<Array<{ name: string; path: string; type: string }>>(
       repo.token,
-      `/repos/${repo.owner}/${repo.repo}/contents/${path}?ref=${repo.branch}`,
+      `/repos/${repo.owner}/${repo.repo}/contents/${path}?ref=${encodeURIComponent(ref)}`,
     );
   } catch (err) {
     if (err instanceof Error && err.message.includes('GitHub API 404')) return [];
@@ -63,22 +83,17 @@ export async function createSingleCommit(
   repo: GitHubRepo,
   changes: FileChange[],
   message: string,
-): Promise<void> {
-  // 1. Get current commit SHA from branch ref
-  const ref = await ghFetch<{ object: { sha: string } }>(
-    repo.token,
-    `/repos/${repo.owner}/${repo.repo}/git/ref/heads/${repo.branch}`,
-  );
-  const parentSha = ref.object.sha;
-
-  // 2. Get base tree SHA from parent commit
+  expectedParentSha?: string,
+): Promise<boolean> {
+  const parentSha = expectedParentSha ?? await getBranchHead(repo);
+  // 1. Get the base tree from the exact revision used to plan the changes.
   const parentCommit = await ghFetch<{ tree: { sha: string } }>(
     repo.token,
     `/repos/${repo.owner}/${repo.repo}/git/commits/${parentSha}`,
   );
   const baseTreeSha = parentCommit.tree.sha;
 
-  // 3. Create blobs for new/updated files (in parallel); mark deletions with sha: null
+  // 2. Create blobs for new/updated files (in parallel); mark deletions with sha: null
   const treeItems = await Promise.all(
     changes.map(async (change): Promise<{
       path: string;
@@ -104,7 +119,7 @@ export async function createSingleCommit(
     }),
   );
 
-  // 4. Create new tree from base + all changes
+  // 3. Create new tree from base + all changes
   const tree = await ghFetch<{ sha: string }>(
     repo.token,
     `/repos/${repo.owner}/${repo.repo}/git/trees`,
@@ -114,7 +129,11 @@ export async function createSingleCommit(
     },
   );
 
-  // 5. Create commit
+  // GitHub allows commits whose tree is identical to their parent. They are never
+  // useful for sync and appear in the UI as commits with zero changed files.
+  if (tree.sha === baseTreeSha) return false;
+
+  // 4. Create commit
   const newCommit = await ghFetch<{ sha: string }>(
     repo.token,
     `/repos/${repo.owner}/${repo.repo}/git/commits`,
@@ -124,7 +143,8 @@ export async function createSingleCommit(
     },
   );
 
-  // 6. Advance branch ref to new commit
+  // 5. Advance the branch. GitHub rejects this when another writer moved HEAD;
+  // callers can then re-list the directory at the new HEAD and retry safely.
   await ghFetch(
     repo.token,
     `/repos/${repo.owner}/${repo.repo}/git/refs/heads/${repo.branch}`,
@@ -133,4 +153,6 @@ export async function createSingleCommit(
       body: JSON.stringify({ sha: newCommit.sha }),
     },
   );
+
+  return true;
 }

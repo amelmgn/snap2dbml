@@ -1,10 +1,17 @@
 import { buildConversionArtifacts } from './conversion.js';
-import { createSingleCommit, listDirectory } from './github-client.js';
+import {
+  createSingleCommit,
+  getBranchHead,
+  GitHubApiError,
+  listDirectory,
+} from './github-client.js';
 import type { FileChange, GitHubRepo } from './github-client.js';
+import { resolveGitHubRepository } from './sync-config.js';
 import type { SyncTarget } from './sync-config.js';
 import type { DirectusSnapshot } from './types.js';
 
 const FETCH_TIMEOUT_MS = 30_000;
+const MAX_COMMIT_ATTEMPTS = 3;
 
 function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response> {
   const controller = new AbortController();
@@ -59,9 +66,10 @@ export async function runSync(
   logger: Pick<NodeJS.WritableStream, 'write'> = process.stderr,
 ): Promise<void> {
   const { name, directus, github, telegram, generateMarkdown = false, convertOptions } = target;
+  const { owner, repo: repoName } = resolveGitHubRepository(github);
   const repo: GitHubRepo = {
-    owner: github.owner,
-    repo: github.repo,
+    owner,
+    repo: repoName,
     branch: github.branch ?? 'main',
     token: github.token,
   };
@@ -77,13 +85,6 @@ export async function runSync(
     generateMarkdown,
   );
 
-  logger.write(`[sync:${name}] Listing existing schema files in ${github.schemaDir}...\n`);
-  const existingEntries = await listDirectory(repo, github.schemaDir);
-  // Match both current (YYYYMMDD) and legacy (YYMMDD) timestamp formats
-  const oldSchemaPaths = existingEntries
-    .filter(e => e.type === 'file' && /^(schema|description)_(\d{6}|\d{8})_\d{6}\.(dbml|md)$/.test(e.name))
-    .map(e => e.path);
-
   const now = new Date();
   const ts = formatTimestamp(now);
 
@@ -95,25 +96,48 @@ export async function runSync(
       : []),
   ];
 
-  // Never delete a path we are about to write (e.g. two runs within the same second) —
-  // duplicate paths in one Git tree are rejected by the GitHub API
   const newPaths = new Set(newFiles.map(f => f.path));
-  const changes: FileChange[] = [
-    ...newFiles,
-    ...oldSchemaPaths.filter(p => !newPaths.has(p)).map(p => ({ path: p, content: null })),
-  ];
-
   const nowIso = now.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
   const commitMessage = `Snapshot updated at ${nowIso}`;
 
-  logger.write(
-    `[sync:${name}] Committing ${changes.length} file change(s) to ${repo.owner}/${repo.repo} (${repo.branch})...\n`,
-  );
-  await createSingleCommit(repo, changes, commitMessage);
+  let committed = false;
+  for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
+    // Pin listing and commit creation to the same HEAD. Without this, another
+    // scheduler can add a set between these operations and leave two sets behind.
+    const parentSha = await getBranchHead(repo);
+    logger.write(`[sync:${name}] Listing existing schema files in ${github.schemaDir}...\n`);
+    const existingEntries = await listDirectory(repo, github.schemaDir, parentSha);
+    const oldArtifactPaths = existingEntries
+      .filter(e => e.type === 'file' && /\.(?:dbml|md)$/i.test(e.name))
+      .map(e => e.path);
 
-  logger.write(`[sync:${name}] Done.\n`);
+    // schemaDir is the managed artifact directory: after every successful run it
+    // contains only the DBML/Markdown files produced by this run.
+    const changes: FileChange[] = [
+      ...newFiles,
+      ...oldArtifactPaths
+        .filter(p => !newPaths.has(p))
+        .map(p => ({ path: p, content: null })),
+    ];
 
-  if (telegram) {
+    logger.write(
+      `[sync:${name}] Committing ${changes.length} file change(s) to ${repo.owner}/${repo.repo} (${repo.branch})...\n`,
+    );
+    try {
+      committed = await createSingleCommit(repo, changes, commitMessage, parentSha);
+      break;
+    } catch (err) {
+      const isConcurrentUpdate = err instanceof GitHubApiError
+        && err.status === 422
+        && err.path.includes('/git/refs/heads/');
+      if (!isConcurrentUpdate || attempt === MAX_COMMIT_ATTEMPTS) throw err;
+      logger.write(`[sync:${name}] Branch changed concurrently; retrying (${attempt + 1}/${MAX_COMMIT_ATTEMPTS})...\n`);
+    }
+  }
+
+  logger.write(`[sync:${name}] ${committed ? 'Done.' : 'No changes; commit skipped.'}\n`);
+
+  if (telegram && committed) {
     await sendTelegram(
       telegram.botToken,
       telegram.chatId,

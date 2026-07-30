@@ -8,9 +8,7 @@
         "bearerToken": "${DIRECTUS_TOKEN}"
       },
       "github": {
-        "owner": "my-org",
-        "repo": "my-repo",
-        "branch": "main",
+        "repository": "my-org/my-repo",
         "token": "${GITHUB_TOKEN}",
         "snapshotPath": "Directus/snapshot/snapshot.json",
         "schemaDir": "Directus/schema"
@@ -29,9 +27,7 @@
         "bearerToken": "${DIRECTUS_TOKEN_2}"
       },
       "github": {
-        "owner": "my-org",
-        "repo": "second-repo",
-        "branch": "main",
+        "repository": "my-org/second-repo",
         "token": "${GITHUB_TOKEN}",
         "snapshotPath": "Directus/snapshot/snapshot.json",
         "schemaDir": "Directus/schema"

@@ -7,9 +7,7 @@ export interface DirectusSyncConfig {
   bearerToken: string;
 }
 
-export interface GitHubSyncConfig {
-  owner: string;
-  repo: string;
+interface GitHubSyncConfigBase {
   /** Default: "main" */
   branch?: string;
   token: string;
@@ -17,6 +15,53 @@ export interface GitHubSyncConfig {
   snapshotPath: string;
   /** Directory for schema_*.dbml and description_*.md files, e.g. "Directus/schema" */
   schemaDir: string;
+}
+
+export type GitHubSyncConfig = GitHubSyncConfigBase & (
+  | {
+      /** GitHub repository as "owner/repo" or a full https://github.com/owner/repo URL */
+      repository: string;
+      owner?: never;
+      repo?: never;
+    }
+  | {
+      /** @deprecated Use repository: "owner/repo" */
+      owner: string;
+      /** @deprecated Use repository: "owner/repo" */
+      repo: string;
+      repository?: never;
+    }
+);
+
+export function parseGitHubRepository(repository: string): { owner: string; repo: string } {
+  const trimmed = repository.trim();
+  const urlMatch = trimmed.match(/^https:\/\/github\.com\/([^/]+)\/([^/?#]+)\/?$/i);
+  const slugMatch = trimmed.match(/^([^/]+)\/([^/]+)$/);
+  const match = urlMatch ?? slugMatch;
+
+  if (!match) {
+    throw new Error(
+      `Invalid GitHub repository "${repository}" (expected "owner/repo" or "https://github.com/owner/repo")`,
+    );
+  }
+
+  const owner = match[1];
+  const repo = match[2].replace(/\.git$/i, '');
+  if (!/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo)) {
+    throw new Error(
+      `Invalid GitHub repository "${repository}" (expected "owner/repo" or "https://github.com/owner/repo")`,
+    );
+  }
+
+  return { owner, repo };
+}
+
+export function resolveGitHubRepository(
+  github: GitHubSyncConfig,
+): { owner: string; repo: string } {
+  return 'repository' in github && github.repository !== undefined
+    ? parseGitHubRepository(github.repository)
+    : { owner: github.owner, repo: github.repo };
 }
 
 export interface TelegramSyncConfig {
@@ -118,8 +163,16 @@ function validateSyncTargets(syncs: unknown[]): void {
       throw new Error(`${ctx}.github is required`);
     }
     const github = target.github as Record<string, unknown>;
-    requireString(github, 'owner', `${ctx}.github`);
-    requireString(github, 'repo', `${ctx}.github`);
+    const hasRepository = typeof github.repository === 'string' && github.repository.length > 0;
+    const hasLegacyPair = typeof github.owner === 'string' && github.owner.length > 0
+      && typeof github.repo === 'string' && github.repo.length > 0;
+    if (hasRepository && hasLegacyPair) {
+      throw new Error(`${ctx}.github must use either repository or owner/repo, not both`);
+    }
+    if (!hasRepository && !hasLegacyPair) {
+      throw new Error(`${ctx}.github.repository is required and must be "owner/repo"`);
+    }
+    if (hasRepository) parseGitHubRepository(github.repository as string);
     requireString(github, 'token', `${ctx}.github`);
     requireString(github, 'snapshotPath', `${ctx}.github`);
     requireString(github, 'schemaDir', `${ctx}.github`);
