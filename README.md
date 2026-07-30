@@ -263,7 +263,7 @@ Response:
 
 ### Logging
 
-The service writes structured JSON logs to stdout, one object per line: `{"time","level","scope","msg",...}`. Requests are logged with method, path (query string stripped), status, and duration; `/health` requests log at `debug` level so container healthchecks stay out of the default stream. View logs with `docker logs` (or `docker compose logs`), which also handles retention. The one-shot `snap2dbml sync` CLI command logs human-readable text to stderr instead.
+The service writes structured JSON logs to stdout, one object per line: `{"time","level","scope","msg",...}`. Requests are logged with method, path (query string stripped), status, and duration; `/health` requests log at `debug` level so container healthchecks stay out of the default stream. View logs with `docker logs` (or `docker compose logs`); the production and staging Compose files cap Docker's log storage at 3 rotated files of 10 MB each. The one-shot `snap2dbml sync` CLI command logs human-readable text to stderr instead.
 
 ### HTTP environment variables
 

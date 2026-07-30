@@ -2,6 +2,8 @@
 
 Added structured logging and a status endpoint to the service. All server and sync output is now emitted as JSON lines on stdout (`{"time","level","scope","msg",...}`) through a new zero-dependency logger (`src/logger.ts`) with `debug`/`info`/`warn`/`error` levels controlled by `LOG_LEVEL` (default `info`). HTTP requests are logged with method, path (query string stripped), status, and duration; `/health` logs at `debug` so container healthchecks stay out of the default stream. Errors carry serialized `message`/`stack` fields. The one-shot `snap2dbml sync` CLI command logs human-readable text to stderr instead of JSON.
 
+Capped Docker log storage for the production and staging containers at 3 rotated files of 10 MB each (`logging` options in `docker-compose.yml` and `docker-compose.stage.yml`), so the json-file driver cannot grow unbounded on long-running hosts.
+
 Added `GET /status` (API-key protected). It reports service version, uptime, whether the scheduler is active, per-target sync state (last run, outcome, whether a commit was produced, last error, next run) tracked by a new in-memory `StatusRegistry` (`src/status.ts`), and a ring buffer of the last 200 log records. `runSync` now returns `{ committed }` so callers and the registry see the run outcome.
 
 Updated files: `src/logger.ts`, `src/status.ts`, `src/server.ts`, `src/scheduler.ts`, `src/syncer.ts`, `src/sync.ts`, `bin/snap2dbml.js`, `.env.example`, `README.md`, `tests/unit/logger.test.ts`, `tests/unit/status.test.ts`, `tests/unit/scheduler.test.ts`, `tests/unit/syncer.test.ts`, `tests/integration/api.test.ts`, `tests/helpers/capture-logger.ts`.

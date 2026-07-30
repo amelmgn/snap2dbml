@@ -21,6 +21,12 @@ services:
       # The host port is mapped above; the server must keep listening on 3000
       # inside the container regardless of what .env.stage says.
       PORT: 3000
+    # Cap Docker's log storage; without this the json-file driver grows unbounded
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Uncomment when testing the built-in sync scheduler:
     # volumes:
     #   - ./sync.stage.json:/app/sync.json:ro
