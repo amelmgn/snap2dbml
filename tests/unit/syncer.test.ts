@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runSync } from '../../src/syncer.js';
+import { captureLogger } from '../helpers/capture-logger.js';
 import type { SyncTarget } from '../../src/sync-config.js';
 
 const snapshot = JSON.parse(
@@ -87,15 +88,22 @@ describe('runSync', () => {
       throw new Error(`Unexpected request: ${method} ${url}`);
     }));
 
-    const log: string[] = [];
-    await runSync(target, { write: chunk => { log.push(String(chunk)); return true; } });
+    const { logger, records } = captureLogger();
+    const { committed } = await runSync(target, logger);
 
+    expect(committed).toBe(true);
     expect(submittedTrees).toHaveLength(2);
     expect(submittedTrees[1]).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: 'Directus/schema/schema_competing.dbml', sha: null }),
       expect.objectContaining({ path: 'Directus/schema/description_competing.md', sha: null }),
     ]));
     expect(submittedTrees[1].some(item => item.path.endsWith('README.txt'))).toBe(false);
-    expect(log.join('')).toContain('Branch changed concurrently; retrying');
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 'warn',
+        scope: 'sync:test',
+        msg: 'Branch changed concurrently; retrying',
+      }),
+    );
   });
 });

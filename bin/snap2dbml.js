@@ -11,7 +11,7 @@ import {
   FileTooLargeError,
   ValidationError,
 } from '../dist/index.js';
-import { loadSyncConfig, SyncScheduler } from '../dist/sync.js';
+import { createLogger, loadSyncConfig, SyncScheduler } from '../dist/sync.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(resolve(__dirname, '..', 'package.json'), 'utf-8'));
@@ -204,7 +204,9 @@ program
       process.exit(1);
     }
 
-    const scheduler = new SyncScheduler(config.syncs);
+    // Human-readable output for interactive one-shot runs; stdout stays clean
+    const logger = createLogger({ format: 'text', stream: process.stderr });
+    const scheduler = new SyncScheduler(config.syncs, logger);
     try {
       if (opts.name) {
         await scheduler.runByName(opts.name);

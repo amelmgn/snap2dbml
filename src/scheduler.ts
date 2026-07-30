@@ -1,4 +1,7 @@
 import { Cron } from 'croner';
+import { createLogger } from './logger.js';
+import type { Logger } from './logger.js';
+import { StatusRegistry } from './status.js';
 import { runSync } from './syncer.js';
 import type { SyncTarget } from './sync-config.js';
 
@@ -22,7 +25,8 @@ export class SyncScheduler {
 
   constructor(
     private readonly targets: SyncTarget[],
-    private readonly logger: Pick<NodeJS.WritableStream, 'write'> = process.stderr,
+    private readonly logger: Logger = createLogger(),
+    private readonly registry: StatusRegistry = new StatusRegistry(),
   ) {}
 
   /** Start scheduled jobs for all targets. */
@@ -31,6 +35,7 @@ export class SyncScheduler {
     this.started = true;
 
     for (const target of this.targets) {
+      const log = this.logger.child(`sync:${target.name}`);
       try {
         const job: Cron = new Cron(
           target.schedule,
@@ -39,29 +44,28 @@ export class SyncScheduler {
             protect: true,
             unref: true,
             catch: (err) => {
-              this.logger.write(
-                `[sync:${target.name}] Error: ${err instanceof Error ? err.message : err}\n`,
-              );
+              this.registry.recordFailure(target.name, err);
+              log.error('Sync failed', { err });
               this.logNextRun(target.name, job);
             },
           },
           async () => {
-            await runSync(target, this.logger);
+            this.registry.recordStart(target.name);
+            const { committed } = await runSync(target, this.logger);
+            this.registry.recordSuccess(target.name, committed);
             this.logNextRun(target.name, job);
           },
         );
         this.jobs.set(target.name, job);
         this.logNextRun(target.name, job);
       } catch (err) {
-        this.logger.write(
-          `[sync:${target.name}] Invalid schedule "${target.schedule}": ${err instanceof Error ? err.message : err}\n`,
-        );
+        log.error(`Invalid schedule "${target.schedule}"`, { err });
       }
     }
 
-    this.logger.write(
-      `snap2dbml: Scheduler started with ${this.jobs.size} sync target(s): ${[...this.jobs.keys()].join(', ')}\n`,
-    );
+    this.logger.info('Scheduler started', {
+      targets: [...this.jobs.keys()],
+    });
   }
 
   /** Stop all scheduled jobs. */
@@ -74,14 +78,13 @@ export class SyncScheduler {
   /** Run all sync targets once immediately (parallel). Throws if any target failed. */
   async runAll(): Promise<void> {
     const results = await Promise.allSettled(
-      this.targets.map(t => runSync(t, this.logger)),
+      this.targets.map(t => this.runTracked(t)),
     );
     const failed: string[] = [];
     for (let i = 0; i < results.length; i++) {
       const r = results[i];
       if (r.status === 'rejected') {
-        const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
-        this.logger.write(`[sync:${this.targets[i].name}] Error: ${msg}\n`);
+        this.logger.child(`sync:${this.targets[i].name}`).error('Sync failed', { err: r.reason });
         failed.push(this.targets[i].name);
       }
     }
@@ -98,11 +101,25 @@ export class SyncScheduler {
         `No sync target "${name}". Available: ${this.targets.map(t => t.name).join(', ')}`,
       );
     }
-    await runSync(target, this.logger);
+    await this.runTracked(target);
+  }
+
+  private async runTracked(target: SyncTarget): Promise<void> {
+    this.registry.recordStart(target.name);
+    try {
+      const { committed } = await runSync(target, this.logger);
+      this.registry.recordSuccess(target.name, committed);
+    } catch (err) {
+      this.registry.recordFailure(target.name, err);
+      throw err;
+    }
   }
 
   private logNextRun(name: string, job: Cron): void {
     const next = job.nextRun();
-    this.logger.write(`[sync:${name}] Next run: ${next ? next.toISOString() : 'never'}\n`);
+    this.registry.setNextRun(name, next);
+    this.logger.child(`sync:${name}`).info('Next run scheduled', {
+      nextRun: next ? next.toISOString() : null,
+    });
   }
 }

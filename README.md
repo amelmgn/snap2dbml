@@ -196,6 +196,32 @@ Set `API_KEY` to require the same value in the `X-API-Key` request header. Leavi
 {"status":"ok"}
 ```
 
+`GET /status` requires the API key and reports service and sync activity without host access:
+
+```json
+{
+  "status": "ok",
+  "version": "1.0.0",
+  "uptimeSeconds": 86400,
+  "scheduler": true,
+  "targets": [
+    {
+      "name": "my-project",
+      "running": false,
+      "lastRunAt": "2026-07-30T00:00:01.000Z",
+      "lastOutcome": "success",
+      "lastCommitted": true,
+      "nextRunAt": "2026-07-31T00:00:00.000Z"
+    }
+  ],
+  "recentLogs": [
+    {"time": "2026-07-30T00:00:01.000Z", "level": "info", "scope": "sync:my-project", "msg": "Done", "committed": true}
+  ]
+}
+```
+
+`targets` reflects sync activity since the last restart; `lastError` is present after a failed run. `recentLogs` holds the last 200 log records.
+
 `POST /convert` converts a Directus snapshot:
 
 ```bash
@@ -235,12 +261,17 @@ Response:
 | 422 | Snapshot validation or conversion failed |
 | 500 | Internal error; details are logged server-side |
 
+### Logging
+
+The service writes structured JSON logs to stdout, one object per line: `{"time","level","scope","msg",...}`. Requests are logged with method, path (query string stripped), status, and duration; `/health` requests log at `debug` level so container healthchecks stay out of the default stream. View logs with `docker logs` (or `docker compose logs`), which also handles retention. The one-shot `snap2dbml sync` CLI command logs human-readable text to stderr instead.
+
 ### HTTP environment variables
 
 | Variable | Description |
 |----------|-------------|
 | `PORT` | Listening port. Default: `3000`. |
 | `API_KEY` | Secret expected in `X-API-Key`. Empty disables authentication. |
+| `LOG_LEVEL` | Minimum log level: `debug`, `info`, `warn`, or `error`. Default: `info`. |
 | `SYNC_CONFIG` | Optional path to `sync.json`; starts the built-in scheduler with the HTTP server. |
 
 ## Docker

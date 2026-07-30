@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { getNextRun, SyncScheduler } from '../../src/scheduler.js';
+import { StatusRegistry } from '../../src/status.js';
+import { captureLogger } from '../helpers/capture-logger.js';
 import type { SyncTarget } from '../../src/sync-config.js';
 
 vi.mock('../../src/syncer.js', () => ({
-  runSync: vi.fn().mockResolvedValue(undefined),
+  runSync: vi.fn().mockResolvedValue({ committed: true }),
 }));
 
 import { runSync } from '../../src/syncer.js';
@@ -20,17 +22,6 @@ function makeTarget(overrides: Partial<SyncTarget> = {}): SyncTarget {
       schemaDir: 'schema',
     },
     ...overrides,
-  };
-}
-
-function makeLogger(): { write: (s: string) => boolean; lines: string[] } {
-  const lines: string[] = [];
-  return {
-    lines,
-    write: (s: string) => {
-      lines.push(s);
-      return true;
-    },
   };
 }
 
@@ -91,6 +82,7 @@ describe('SyncScheduler', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 5, 10, 12, 0, 0));
     vi.mocked(runSync).mockClear();
+    vi.mocked(runSync).mockResolvedValue({ committed: true });
   });
 
   afterEach(() => {
@@ -98,54 +90,82 @@ describe('SyncScheduler', () => {
   });
 
   it('schedules jobs on start and logs the next run', () => {
-    const logger = makeLogger();
+    const { logger, records } = captureLogger();
     const scheduler = new SyncScheduler([makeTarget()], logger);
     scheduler.start();
 
-    expect(logger.lines.some(l => l.includes('[sync:test-target] Next run:'))).toBe(true);
-    expect(logger.lines.some(l => l.includes('Scheduler started with 1 sync target(s)'))).toBe(true);
+    expect(records).toContainEqual(
+      expect.objectContaining({ scope: 'sync:test-target', msg: 'Next run scheduled' }),
+    );
+    expect(records).toContainEqual(
+      expect.objectContaining({ msg: 'Scheduler started', targets: ['test-target'] }),
+    );
     scheduler.stop();
   });
 
-  it('fires runSync when the schedule matches', async () => {
-    const logger = makeLogger();
-    const scheduler = new SyncScheduler([makeTarget({ schedule: '30 12 * * *' })], logger);
+  it('fires runSync when the schedule matches and updates the registry', async () => {
+    const { logger } = captureLogger();
+    const registry = new StatusRegistry();
+    const scheduler = new SyncScheduler([makeTarget({ schedule: '30 12 * * *' })], logger, registry);
     scheduler.start();
 
     await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
     expect(runSync).toHaveBeenCalledTimes(1);
+    expect(registry.targets()[0]).toMatchObject({
+      name: 'test-target',
+      running: false,
+      lastOutcome: 'success',
+      lastCommitted: true,
+    });
     scheduler.stop();
   });
 
-  it('keeps scheduling after a failed run and logs the error', async () => {
+  it('keeps scheduling after a failed run, logs the error, and records the failure', async () => {
     vi.mocked(runSync).mockRejectedValueOnce(new Error('boom'));
-    const logger = makeLogger();
-    const scheduler = new SyncScheduler([makeTarget({ schedule: '30 12 * * *' })], logger);
+    const { logger, records } = captureLogger();
+    const registry = new StatusRegistry();
+    const scheduler = new SyncScheduler([makeTarget({ schedule: '30 12 * * *' })], logger, registry);
     scheduler.start();
 
     await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
-    expect(logger.lines.some(l => l.includes('[sync:test-target] Error: boom'))).toBe(true);
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 'error',
+        scope: 'sync:test-target',
+        msg: 'Sync failed',
+        err: expect.objectContaining({ message: 'boom' }),
+      }),
+    );
+    expect(registry.targets()[0]).toMatchObject({ lastOutcome: 'failure', lastError: 'boom' });
     // A next run is still scheduled after the failure
-    const nextRunLogs = logger.lines.filter(l => l.includes('Next run:'));
+    const nextRunLogs = records.filter(r => r.msg === 'Next run scheduled');
     expect(nextRunLogs.length).toBeGreaterThanOrEqual(2);
     scheduler.stop();
   });
 
   it('logs and skips a target with an invalid schedule without throwing', () => {
-    const logger = makeLogger();
+    const { logger, records } = captureLogger();
     const scheduler = new SyncScheduler(
       [makeTarget({ name: 'bad', schedule: 'not-a-cron' }), makeTarget({ name: 'good' })],
       logger,
     );
     expect(() => scheduler.start()).not.toThrow();
 
-    expect(logger.lines.some(l => l.includes('[sync:bad] Invalid schedule'))).toBe(true);
-    expect(logger.lines.some(l => l.includes('Scheduler started with 1 sync target(s): good'))).toBe(true);
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 'error',
+        scope: 'sync:bad',
+        msg: 'Invalid schedule "not-a-cron"',
+      }),
+    );
+    expect(records).toContainEqual(
+      expect.objectContaining({ msg: 'Scheduler started', targets: ['good'] }),
+    );
     scheduler.stop();
   });
 
   it('does not fire after stop()', async () => {
-    const logger = makeLogger();
+    const { logger } = captureLogger();
     const scheduler = new SyncScheduler([makeTarget({ schedule: '30 12 * * *' })], logger);
     scheduler.start();
     scheduler.stop();
@@ -156,7 +176,7 @@ describe('SyncScheduler', () => {
 
   it('runByName runs a single target and rejects unknown names', async () => {
     const targets = [makeTarget({ name: 'one' }), makeTarget({ name: 'two' })];
-    const scheduler = new SyncScheduler(targets, makeLogger());
+    const scheduler = new SyncScheduler(targets, captureLogger().logger);
 
     await scheduler.runByName('two');
     expect(runSync).toHaveBeenCalledTimes(1);
@@ -168,12 +188,18 @@ describe('SyncScheduler', () => {
   it('runAll runs every target and reports failures', async () => {
     vi.mocked(runSync)
       .mockRejectedValueOnce(new Error('boom'))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ committed: false });
     const targets = [makeTarget({ name: 'one' }), makeTarget({ name: 'two' })];
-    const logger = makeLogger();
-    const scheduler = new SyncScheduler(targets, logger);
+    const registry = new StatusRegistry();
+    const scheduler = new SyncScheduler(targets, captureLogger().logger, registry);
 
     await expect(scheduler.runAll()).rejects.toThrow(/1 sync target\(s\) failed: one/);
     expect(runSync).toHaveBeenCalledTimes(2);
+    expect(registry.targets()).toContainEqual(
+      expect.objectContaining({ name: 'one', lastOutcome: 'failure' }),
+    );
+    expect(registry.targets()).toContainEqual(
+      expect.objectContaining({ name: 'two', lastOutcome: 'success', lastCommitted: false }),
+    );
   });
 });

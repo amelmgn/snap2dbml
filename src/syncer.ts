@@ -6,6 +6,8 @@ import {
   listDirectory,
 } from './github-client.js';
 import type { FileChange, GitHubRepo } from './github-client.js';
+import { createLogger } from './logger.js';
+import type { Logger } from './logger.js';
 import { resolveGitHubRepository } from './sync-config.js';
 import type { SyncTarget } from './sync-config.js';
 import type { DirectusSnapshot } from './types.js';
@@ -44,7 +46,7 @@ async function sendTelegram(
   botToken: string,
   chatId: string,
   text: string,
-  logger: Pick<NodeJS.WritableStream, 'write'>,
+  logger: Logger,
 ): Promise<void> {
   try {
     const response = await fetchWithTimeout(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -54,18 +56,19 @@ async function sendTelegram(
     });
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      logger.write(`[sync] Telegram notification failed: HTTP ${response.status} ${body}\n`);
+      logger.warn('Telegram notification failed', { status: response.status, body });
     }
   } catch (err) {
-    logger.write(`[sync] Telegram notification failed: ${err instanceof Error ? err.message : err}\n`);
+    logger.warn('Telegram notification failed', { err });
   }
 }
 
 export async function runSync(
   target: SyncTarget,
-  logger: Pick<NodeJS.WritableStream, 'write'> = process.stderr,
-): Promise<void> {
+  baseLogger: Logger = createLogger(),
+): Promise<{ committed: boolean }> {
   const { name, directus, github, telegram, generateMarkdown = false, convertOptions } = target;
+  const logger = baseLogger.child(`sync:${name}`);
   const { owner, repo: repoName } = resolveGitHubRepository(github);
   const repo: GitHubRepo = {
     owner,
@@ -74,11 +77,11 @@ export async function runSync(
     token: github.token,
   };
 
-  logger.write(`[sync:${name}] Fetching snapshot from Directus...\n`);
+  logger.info('Fetching snapshot from Directus');
   const snapshot = await fetchDirectusSnapshot(directus.snapshotUrl, directus.bearerToken);
   const snapshotJson = JSON.stringify(snapshot, null, 2);
 
-  logger.write(`[sync:${name}] Converting to DBML${generateMarkdown ? ' + Markdown' : ''}...\n`);
+  logger.info(`Converting to DBML${generateMarkdown ? ' + Markdown' : ''}`);
   const result = buildConversionArtifacts(
     snapshot,
     { suppressWarnings: true, ...convertOptions },
@@ -105,7 +108,7 @@ export async function runSync(
     // Pin listing and commit creation to the same HEAD. Without this, another
     // scheduler can add a set between these operations and leave two sets behind.
     const parentSha = await getBranchHead(repo);
-    logger.write(`[sync:${name}] Listing existing schema files in ${github.schemaDir}...\n`);
+    logger.debug('Listing existing schema files', { schemaDir: github.schemaDir });
     const existingEntries = await listDirectory(repo, github.schemaDir, parentSha);
     const oldArtifactPaths = existingEntries
       .filter(e => e.type === 'file' && /\.(?:dbml|md)$/i.test(e.name))
@@ -120,9 +123,11 @@ export async function runSync(
         .map(p => ({ path: p, content: null })),
     ];
 
-    logger.write(
-      `[sync:${name}] Committing ${changes.length} file change(s) to ${repo.owner}/${repo.repo} (${repo.branch})...\n`,
-    );
+    logger.info('Committing file changes', {
+      changes: changes.length,
+      repository: `${repo.owner}/${repo.repo}`,
+      branch: repo.branch,
+    });
     try {
       committed = await createSingleCommit(repo, changes, commitMessage, parentSha);
       break;
@@ -131,11 +136,14 @@ export async function runSync(
         && err.status === 422
         && err.path.includes('/git/refs/heads/');
       if (!isConcurrentUpdate || attempt === MAX_COMMIT_ATTEMPTS) throw err;
-      logger.write(`[sync:${name}] Branch changed concurrently; retrying (${attempt + 1}/${MAX_COMMIT_ATTEMPTS})...\n`);
+      logger.warn('Branch changed concurrently; retrying', {
+        attempt: attempt + 1,
+        maxAttempts: MAX_COMMIT_ATTEMPTS,
+      });
     }
   }
 
-  logger.write(`[sync:${name}] ${committed ? 'Done.' : 'No changes; commit skipped.'}\n`);
+  logger.info(committed ? 'Done' : 'No changes; commit skipped', { committed });
 
   if (telegram && committed) {
     await sendTelegram(
@@ -145,4 +153,6 @@ export async function runSync(
       logger,
     );
   }
+
+  return { committed };
 }
