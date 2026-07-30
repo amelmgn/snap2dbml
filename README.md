@@ -81,6 +81,7 @@ cp sync.example.json sync.json
     {
       "name": "my-project",
       "schedule": "0 0 * * 1-5",
+      "timezone": "Europe/Podgorica",
       "directus": {
         "snapshotUrl": "https://cms.example.com/schema/snapshot?export=json",
         "bearerToken": "${DIRECTUS_TOKEN}"
@@ -133,7 +134,7 @@ Each successful sync commit contains:
 
 The directory listing and commit use the same branch revision. If another scheduler updates the branch concurrently, sync reads the new HEAD and retries. Identical Git trees are not committed, and Telegram is notified only after a real branch update.
 
-Cron expressions support values, ranges (`1-5`), wildcards (`*`), lists (`1,3,5`), and steps (`*/15`, `8-17/2`). Scheduling evaluates minute, hour, and day of week. Day of month and month must be `*`; `7` is accepted as Sunday.
+Scheduling uses [croner](https://github.com/hexagon/croner). Cron expressions support values, ranges (`1-5`), wildcards (`*`), lists (`1,3,5`), steps (`*/15`, `8-17/2`), day and month names (`MON-FRI`, `JAN`), and the `L` (last), `W` (nearest weekday), and `#` (nth weekday) modifiers. All five fields are evaluated; `7` is accepted as Sunday. An optional `timezone` per target pins the schedule to an IANA timezone (e.g. `"timezone": "Europe/Podgorica"`); without it, schedules run in server-local time. Invalid schedules and timezones are rejected when the configuration is loaded.
 
 ### CLI options
 

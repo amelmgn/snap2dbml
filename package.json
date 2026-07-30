@@ -14,7 +14,10 @@
   "bin": {
     "snap2dbml": "./bin/snap2dbml.js"
   },
-  "files": ["dist", "bin"],
+  "files": [
+    "dist",
+    "bin"
+  ],
   "scripts": {
     "build": "tsup",
     "start": "node dist/server.js",
@@ -30,14 +33,15 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "commander": "^12.0.0"
+    "commander": "^12.0.0",
+    "croner": "^10.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@vitest/coverage-v8": "^2.0.0",
+    "fast-check": "^3.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0",
-    "vitest": "^2.0.0",
-    "fast-check": "^3.0.0"
+    "vitest": "^2.0.0"
   }
 }

@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { Cron } from 'croner';
 import type { ConvertOptions } from './types.js';
 
 export interface DirectusSyncConfig {
@@ -71,8 +72,10 @@ export interface TelegramSyncConfig {
 
 export interface SyncTarget {
   name: string;
-  /** Standard 5-field cron expression, e.g. "0 0 * * 1-5" */
+  /** Cron expression, e.g. "0 0 * * 1-5". Supports the full croner syntax. */
   schedule: string;
+  /** Optional IANA timezone for the schedule, e.g. "Europe/Podgorica". Defaults to server-local time. */
+  timezone?: string;
   directus: DirectusSyncConfig;
   github: GitHubSyncConfig;
   telegram?: TelegramSyncConfig;
@@ -147,6 +150,21 @@ function validateSyncTargets(syncs: unknown[]): void {
 
     requireString(target, 'name', ctx);
     requireString(target, 'schedule', ctx);
+    if (target.timezone !== undefined && typeof target.timezone !== 'string') {
+      throw new Error(`${ctx}.timezone must be a string (IANA timezone name)`);
+    }
+    try {
+      const probe = new Cron(target.schedule as string, {
+        timezone: target.timezone as string | undefined,
+      });
+      // Timezone problems only surface when a run time is computed
+      probe.nextRun();
+      probe.stop();
+    } catch (err) {
+      throw new Error(
+        `${ctx}.schedule is invalid: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     const name = target.name as string;
     if (names.has(name)) throw new Error(`Duplicate sync target name: "${name}"`);

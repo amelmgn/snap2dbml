@@ -3,6 +3,7 @@
     {
       "name": "my-project",
       "schedule": "0 0 * * 1-5",
+      "timezone": "Europe/Podgorica",
       "directus": {
         "snapshotUrl": "https://cms.example.com/schema/snapshot?export=json",
         "bearerToken": "${DIRECTUS_TOKEN}"
