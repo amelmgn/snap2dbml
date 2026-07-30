@@ -241,8 +241,8 @@ describe('transformSnapshot', () => {
   });
 
   describe('O2O relationships', () => {
-    it('should create O2O reference with - symbol when one_field is present', () => {
-      const snapshot: DirectusSnapshot = {
+    function buildO2OSnapshot(fkIsUnique: boolean): DirectusSnapshot {
+      return {
         version: 1,
         directus: '10.10.0',
         collections: [
@@ -251,7 +251,7 @@ describe('transformSnapshot', () => {
         ],
         fields: [
           { collection: 'users', field: 'id', type: 'uuid', meta: { id: 1, collection: 'users', field: 'id' }, schema: { name: 'id', table: 'users', data_type: 'uuid', is_nullable: false, is_primary_key: true } },
-          { collection: 'users', field: 'profile_id', type: 'uuid', meta: { id: 2, collection: 'users', field: 'profile_id' }, schema: { name: 'profile_id', table: 'users', data_type: 'uuid', is_nullable: true, is_primary_key: false } },
+          { collection: 'users', field: 'profile_id', type: 'uuid', meta: { id: 2, collection: 'users', field: 'profile_id' }, schema: { name: 'profile_id', table: 'users', data_type: 'uuid', is_nullable: true, is_unique: fkIsUnique, is_primary_key: false } },
           { collection: 'profiles', field: 'id', type: 'uuid', meta: { id: 3, collection: 'profiles', field: 'id' }, schema: { name: 'id', table: 'profiles', data_type: 'uuid', is_nullable: false, is_primary_key: true } },
         ],
         relations: [
@@ -268,8 +268,10 @@ describe('transformSnapshot', () => {
           },
         ],
       };
+    }
 
-      const result = transformSnapshot(snapshot);
+    it('should create O2O reference with - symbol when the FK column is unique', () => {
+      const result = transformSnapshot(buildO2OSnapshot(true));
 
       expect(result.schema.references).toHaveLength(1);
       expect(result.schema.references[0]).toMatchObject({
@@ -278,6 +280,21 @@ describe('transformSnapshot', () => {
         toTable: 'profiles',
         toColumn: 'id',
         relation: '-',
+      });
+    });
+
+    it('should create M2O reference with > symbol when one_field is set but the FK column is not unique', () => {
+      // one_field is just a reverse O2M alias field — without a unique constraint
+      // on the FK this is an ordinary many-to-one relation
+      const result = transformSnapshot(buildO2OSnapshot(false));
+
+      expect(result.schema.references).toHaveLength(1);
+      expect(result.schema.references[0]).toMatchObject({
+        fromTable: 'users',
+        fromColumn: 'profile_id',
+        toTable: 'profiles',
+        toColumn: 'id',
+        relation: '>',
       });
     });
   });
@@ -401,6 +418,90 @@ describe('transformSnapshot', () => {
       expect(result.schema.tables.find((t) => t.name === '製品')).toBeDefined();
       const cat = result.schema.tables.find((t) => t.name === 'categorías')!;
       expect(cat.columns.find((c) => c.name === 'nombre')).toBeDefined();
+    });
+  });
+
+  describe('default value escaping', () => {
+    function snapshotWithDefault(defaultValue: unknown): DirectusSnapshot {
+      return {
+        version: 1,
+        directus: '10.10.0',
+        collections: [
+          { collection: 'items', meta: { collection: 'items', hidden: false, singleton: false }, schema: { name: 'items' } },
+        ],
+        fields: [
+          { collection: 'items', field: 'id', type: 'uuid', meta: { id: 1, collection: 'items', field: 'id' }, schema: { name: 'id', table: 'items', data_type: 'uuid', is_nullable: false, is_primary_key: true } },
+          { collection: 'items', field: 'label', type: 'string', meta: { id: 2, collection: 'items', field: 'label' }, schema: { name: 'label', table: 'items', data_type: 'varchar', default_value: defaultValue, is_nullable: true, is_primary_key: false } },
+        ],
+        relations: [],
+      };
+    }
+
+    function getDefault(snapshot: DirectusSnapshot): string | undefined {
+      const result = transformSnapshot(snapshot);
+      return result.schema.tables[0].columns.find((c) => c.name === 'label')!.defaultValue;
+    }
+
+    it('should escape single quotes in string defaults', () => {
+      expect(getDefault(snapshotWithDefault("O'Brien"))).toBe("'O\\'Brien'");
+    });
+
+    it('should escape backslashes in string defaults', () => {
+      expect(getDefault(snapshotWithDefault('a\\b'))).toBe("'a\\\\b'");
+    });
+
+    it('should replace newlines in string defaults', () => {
+      expect(getDefault(snapshotWithDefault('line1\nline2'))).toBe("'line1 line2'");
+    });
+
+    it('should serialize object defaults as JSON', () => {
+      expect(getDefault(snapshotWithDefault({ a: 1 }))).toBe('\'{"a":1}\'');
+    });
+  });
+
+  describe('multiple primary keys warning', () => {
+    it('should warn when a collection has more than one primary key column', () => {
+      const snapshot: DirectusSnapshot = {
+        version: 1,
+        directus: '10.10.0',
+        collections: [
+          { collection: 'items', meta: { collection: 'items', hidden: false, singleton: false }, schema: { name: 'items' } },
+        ],
+        fields: [
+          { collection: 'items', field: 'id_a', type: 'uuid', meta: { id: 1, collection: 'items', field: 'id_a' }, schema: { name: 'id_a', table: 'items', data_type: 'uuid', is_nullable: false, is_primary_key: true } },
+          { collection: 'items', field: 'id_b', type: 'uuid', meta: { id: 2, collection: 'items', field: 'id_b' }, schema: { name: 'id_b', table: 'items', data_type: 'uuid', is_nullable: false, is_primary_key: true } },
+        ],
+        relations: [],
+      };
+
+      const result = transformSnapshot(snapshot);
+      const warning = result.warnings.find((w) => w.code === WARNING_CODES.MULTIPLE_PRIMARY_KEYS);
+      expect(warning).toBeDefined();
+      expect(warning!.collection).toBe('items');
+    });
+  });
+
+  describe('virtual field name collisions', () => {
+    it('should drop an alias virtual field that collides with a real column and warn', () => {
+      const snapshot: DirectusSnapshot = {
+        version: 1,
+        directus: '10.10.0',
+        collections: [
+          { collection: 'units', meta: { collection: 'units', hidden: false, singleton: false }, schema: { name: 'units' } },
+        ],
+        fields: [
+          { collection: 'units', field: 'id', type: 'uuid', meta: { id: 1, collection: 'units', field: 'id' }, schema: { name: 'id', table: 'units', data_type: 'uuid', is_nullable: false, is_primary_key: true } },
+          { collection: 'units', field: 'price', type: 'integer', meta: { id: 2, collection: 'units', field: 'price' }, schema: { name: 'price', table: 'units', data_type: 'integer', is_nullable: true, is_primary_key: false } },
+          { collection: 'units', field: 'price', type: 'alias', meta: { id: 3, collection: 'units', field: 'price', special: ['o2m'] }, schema: null },
+        ],
+        relations: [],
+      };
+
+      const result = transformSnapshot(snapshot);
+      const units = result.schema.tables[0];
+      expect(units.columns.filter((c) => c.name === 'price')).toHaveLength(1);
+      expect(units.virtualFields ?? []).toHaveLength(0);
+      expect(result.warnings.some((w) => w.code === WARNING_CODES.DUPLICATE_VIRTUAL_FIELD)).toBe(true);
     });
   });
 });

@@ -192,6 +192,14 @@ describe('generateDBML', () => {
       expect(dbml).toContain("  deals_id virtual [note: 'o2m → deals']");
     });
 
+    it('should escape quotes in virtual field notes', () => {
+      const table = makeTable('brokers', [makeCol('id', 'int', { isPrimaryKey: true })]);
+      table.virtualFields = [{ name: 'deals_id', kind: 'o2m', relatedCollection: "it's" }];
+      const schema = makeSchema([table]);
+      const dbml = generateDBML(schema);
+      expect(dbml).toContain("  deals_id virtual [note: 'o2m → it\\'s']");
+    });
+
     it('should sort virtual fields alphabetically', () => {
       const table = makeTable('brokers', [makeCol('id', 'int', { isPrimaryKey: true })]);
       table.virtualFields = [

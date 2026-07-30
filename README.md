@@ -1,30 +1,51 @@
-## How it works
+# snap2dbml
 
-Convert [Directus](https://directus.io/) JSON schema snapshots into [DBML](https://dbml.dbdiagram.io/) (Database Markup Language) format for use with database diagramming tools.
+Convert [Directus](https://directus.io/) JSON schema snapshots into [DBML](https://dbml.dbdiagram.io/) for database visualization, documentation, and version-controlled schema history.
 
-## Why?
+Directus stores schema snapshots in a proprietary JSON format. snap2dbml turns them into deterministic, diffable DBML and optional Markdown documentation without manual schema maintenance.
 
-Directus stores schema in a proprietary JSON format that isn't compatible with standard database visualization tools. snap2dbml bridges that gap — giving you clean, diffable DBML output from your existing Directus snapshots, with no manual documentation needed.
+Requires **Node.js 18.0.0** or newer.
 
-## Installation
+## CLI
+
+### Installation
 
 ```bash
 npm install snap2dbml
 ```
 
-Requires **Node.js 18.0.0** and above.
+To make `snap2dbml` available globally from a cloned repository:
 
-## Quick Start
+```bash
+npm link
+```
 
-### Setup
+### Basic usage
 
-Copy the example settings file and adjust paths to match your environment:
+```bash
+# Convert using settings.json
+snap2dbml
+
+# Convert a specific snapshot
+snap2dbml snapshot.json
+
+# Generate DBML and Markdown documentation
+snap2dbml snapshot.json --md
+
+# Write DBML to an explicit path
+snap2dbml snapshot.json -o schema.dbml
+
+# Read a snapshot from stdin
+cat snapshot.json | snap2dbml
+```
+
+### CLI settings
+
+Copy the example and adjust the paths:
 
 ```bash
 cp settings.example.json settings.json
 ```
-
-Edit `settings.json` to configure your input and output folders:
 
 ```json
 {
@@ -37,99 +58,171 @@ Edit `settings.json` to configure your input and output folders:
 
 | Setting | Description |
 |---------|-------------|
-| `inputFolder` | Folder containing your Directus snapshot JSON file. Used when no file argument is passed. |
+| `inputFolder` | Folder containing the Directus snapshot JSON file. Used when no file argument is passed. |
 | `outputFolder` | Folder where generated files are written. |
-| `cleanOutput` | When `true`, deletes previous timestamped `schema_*.dbml` outputs (and matching `description_*.md` files when `generateMarkdown` is enabled) from the managed `outputFolder` before writing new ones. Explicit `-o/--output` paths are never cleaned automatically. |
-| `generateMarkdown` | When `true`, also generates a Markdown collection description file alongside the DBML output. |
+| `cleanOutput` | Deletes previous timestamped `schema_*.dbml` outputs and matching `description_*.md` files from the managed output folder. Explicit `--output` paths are never cleaned automatically. |
+| `generateMarkdown` | Generates a Markdown collection description alongside DBML. |
 
-Paths can be relative (to the working directory) or absolute.
+Paths may be relative to the working directory or absolute.
 
-### CLI
+### Automated GitHub sync
 
-```bash
-# Convert using settings.json (reads from inputFolder, writes to outputFolder)
-snap2dbml
+The CLI can fetch snapshots from Directus and commit the converted files to GitHub without n8n or an external orchestrator. Every run creates at most one GitHub commit.
 
-# Convert a specific snapshot file
-snap2dbml snapshot.json
-
-# Also generate a Markdown collection description alongside DBML
-snap2dbml snapshot.json --md
-
-# Write output to a specific file
-snap2dbml snapshot.json -o schema.dbml
-
-# Read from stdin
-cat snapshot.json | snap2dbml
-```
-
-To make `snap2dbml` available globally (run from any directory):
+Create the configuration:
 
 ```bash
-npm link
+cp sync.example.json sync.json
 ```
 
-### Library
-
-```typescript
-import { convertSnapshot, convertSnapshotString } from 'snap2dbml';
-
-// From a parsed object
-const dbml = convertSnapshot(snapshotObject);
-
-// From a JSON string
-const dbml = convertSnapshotString(jsonString);
-
-// With options and statistics
-import { convertSnapshotWithStats } from 'snap2dbml';
-
-const result = convertSnapshotWithStats(snapshotObject, {
-  includeSystem: false,
-  includeComments: true,
-});
-// result.dbml       - DBML string
-// result.warnings   - conversion warnings
-// result.stats      - tables/fields/relations counts, duration
-// result.metadata   - Directus version, generation timestamp
-
-// Generate a Markdown collection description
-import { convertSnapshotToMarkdown } from 'snap2dbml';
-
-const mdResult = convertSnapshotToMarkdown(snapshotObject);
-// mdResult.markdown  - Markdown string with per-collection field tables
-// mdResult.warnings  - conversion warnings
-// mdResult.stats     - tables/fields/relations counts, duration
-// mdResult.metadata  - Directus version, generation timestamp
+```json
+{
+  "syncs": [
+    {
+      "name": "my-project",
+      "schedule": "0 0 * * 1-5",
+      "timezone": "Europe/Podgorica",
+      "directus": {
+        "snapshotUrl": "https://cms.example.com/schema/snapshot?export=json",
+        "bearerToken": "${DIRECTUS_TOKEN}"
+      },
+      "github": {
+        "repository": "my-org/my-repo",
+        "token": "${GITHUB_TOKEN}",
+        "snapshotPath": "Directus/snapshot/snapshot.json",
+        "schemaDir": "Directus/schema"
+      },
+      "telegram": {
+        "botToken": "${TELEGRAM_BOT_TOKEN}",
+        "chatId": "YOUR_CHAT_ID"
+      },
+      "generateMarkdown": true
+    }
+  ]
+}
 ```
 
-### HTTP Server
+`github.repository` accepts the preferred `owner/repo` form or a full `https://github.com/owner/repo` URL. It does not encode a branch. `github.branch` is optional and defaults to `main`:
 
-snap2dbml can run as a stateless HTTP backend service — useful for automation via n8n, CI/CD pipelines, or any HTTP client.
+```json
+{
+  "repository": "my-org/my-repo",
+  "branch": "schema-docs"
+}
+```
 
-**Local development:**
+The legacy `owner` and `repo` fields remain supported for existing configurations, but they cannot be combined with `repository` in the same target. Values such as `${DIRECTUS_TOKEN}` are substituted from environment variables when the configuration is loaded.
+
+Add more objects to `syncs` to manage multiple repositories. Each target has an independent schedule, credentials, destination, and conversion settings.
+
+Run configured targets manually:
 
 ```bash
-cp .env.example .env
-# Set API_KEY in .env
-docker compose -f docker-compose.dev.yml up -d --build
-curl http://localhost:3001/health
+# Run all targets
+snap2dbml sync --config sync.json
+
+# Run one target
+snap2dbml sync --config sync.json --name my-project
 ```
 
-**Production (VPS) — image pulled from GitHub Container Registry:**
+Each successful sync commit contains:
+
+- the updated `snapshot.json`;
+- a new `schema_YYYYMMDD_HHMMSS.dbml` using a UTC timestamp;
+- a matching `description_YYYYMMDD_HHMMSS.md` when Markdown generation is enabled;
+- deletion of previous `.dbml` and `.md` artifacts from the managed `schemaDir`.
+
+The directory listing and commit use the same branch revision. If another scheduler updates the branch concurrently, sync reads the new HEAD and retries. Identical Git trees are not committed, and Telegram is notified only after a real branch update.
+
+Scheduling uses [croner](https://github.com/hexagon/croner). Cron expressions support values, ranges (`1-5`), wildcards (`*`), lists (`1,3,5`), steps (`*/15`, `8-17/2`), day and month names (`MON-FRI`, `JAN`), and the `L` (last), `W` (nearest weekday), and `#` (nth weekday) modifiers. All five fields are evaluated; `7` is accepted as Sunday. An optional `timezone` per target pins the schedule to an IANA timezone (e.g. `"timezone": "Europe/Podgorica"`); without it, schedules run in server-local time. Invalid schedules and timezones are rejected when the configuration is loaded.
+
+### CLI options
+
+```text
+Usage: snap2dbml [options] [file]
+
+Arguments:
+  file                      Path to snapshot file (reads stdin if omitted or '-')
+
+Options:
+  -o, --output <file>       Write output to file (default: stdout)
+  --stdout                  Explicitly output to stdout
+  --md                      Also generate a Markdown collection description file
+  --include-system          Include Directus system collections (directus_*)
+  --include-comments        Include table/column comments from meta.note
+  --max-size <mb>           Maximum input size in MB (default: 50)
+  --fail-on-circular        Exit with code 5 on circular references
+  --suppress-warnings       Suppress warning messages to stderr
+  -v, --verbose             Show stats and metadata as JSON after output
+  -q, --quiet               Suppress all non-error output
+  --version                 Show version number
+  -h, --help                Show help
+```
+
+### CLI exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Invalid input or processing error |
+| 2 | File not found |
+| 3 | Permission denied |
+| 4 | Input file too large |
+| 5 | Circular reference detected with `--fail-on-circular` |
+
+## HTTP API
+
+snap2dbml includes a stateless HTTP service for n8n, CI/CD pipelines, and other HTTP clients. It uses the same conversion pipeline as the CLI and library.
+
+### Running without Docker
 
 ```bash
-cp .env.example .env
-# Set API_KEY and GHCR_OWNER (your GitHub username) in .env
-docker compose pull && docker compose up -d
+npm install
+npm run build
+API_KEY=your-secret npm start
 ```
 
-The image is built and pushed automatically to `ghcr.io` on every push to the `stage` branch via GitHub Actions. No source code needed on the server.
+The server listens on port `3000` by default.
 
-**Endpoints:**
+### Authentication
 
-`GET /health` — no authentication required. Returns `{"status":"ok"}`.
+Set `API_KEY` to require the same value in the `X-API-Key` request header. Leaving `API_KEY` empty disables authentication and is not recommended outside local development.
 
-`POST /convert` — convert a snapshot:
+### Endpoints
+
+`GET /health` requires no authentication and returns:
+
+```json
+{"status":"ok"}
+```
+
+`GET /status` requires the API key and reports service and sync activity without host access:
+
+```json
+{
+  "status": "ok",
+  "version": "1.0.0",
+  "uptimeSeconds": 86400,
+  "scheduler": true,
+  "targets": [
+    {
+      "name": "my-project",
+      "running": false,
+      "lastRunAt": "2026-07-30T00:00:01.000Z",
+      "lastOutcome": "success",
+      "lastCommitted": true,
+      "nextRunAt": "2026-07-31T00:00:00.000Z"
+    }
+  ],
+  "recentLogs": [
+    {"time": "2026-07-30T00:00:01.000Z", "level": "info", "scope": "sync:my-project", "msg": "Done", "committed": true}
+  ]
+}
+```
+
+`targets` reflects sync activity since the last restart; `lastError` is present after a failed run. `recentLogs` holds the last 200 log records.
+
+`POST /convert` converts a Directus snapshot:
 
 ```bash
 curl -X POST http://localhost:3000/convert \
@@ -156,68 +249,170 @@ Response:
 
 `md` is `null` when `generateMarkdown` is omitted or `false`.
 
-**Environment variables:**
+### HTTP status codes
+
+| Status | Meaning |
+|--------|---------|
+| 200 | Conversion succeeded |
+| 400 | Invalid JSON body or missing `snapshot` field |
+| 401 | Missing or incorrect `X-API-Key` |
+| 404 | Unknown method or path |
+| 413 | Request body exceeds 50 MB |
+| 422 | Snapshot validation or conversion failed |
+| 500 | Internal error; details are logged server-side |
+
+### Logging
+
+The service writes structured JSON logs to stdout, one object per line: `{"time","level","scope","msg",...}`. Requests are logged with method, path (query string stripped), status, and duration; `/health` requests log at `debug` level so container healthchecks stay out of the default stream. View logs with `docker logs` (or `docker compose logs`); the production and staging Compose files cap Docker's log storage at 3 rotated files of 10 MB each. The one-shot `snap2dbml sync` CLI command logs human-readable text to stderr instead.
+
+### HTTP environment variables
 
 | Variable | Description |
 |----------|-------------|
-| `PORT` | Port to listen on (default: `3000`) |
-| `API_KEY` | Secret for `X-API-Key` header. Leave empty to disable auth (not recommended). |
-| `GHCR_OWNER` | Your GitHub username — used by `docker-compose.yml` to pull the image from `ghcr.io`. |
+| `PORT` | Listening port. Default: `3000`. |
+| `API_KEY` | Secret expected in `X-API-Key`. Empty disables authentication. |
+| `LOG_LEVEL` | Minimum log level: `debug`, `info`, `warn`, or `error`. Default: `info`. |
+| `SYNC_CONFIG` | Optional path to `sync.json`; starts the built-in scheduler with the HTTP server. |
 
-**n8n integration:**
+## Docker
 
-1. **HTTP Request** → `GET /api/schema/snapshot` on your Directus instance (with Directus auth token)
-2. **HTTP Request** → `POST https://your-server/convert` with `X-API-Key` header and body `{"snapshot": {{ $json }}, "generateMarkdown": true}`
-3. Use `{{ $json.dbml }}` and `{{ $json.md }}` in subsequent nodes
+Docker runs the HTTP service from the same production image. Production, staging, and local builds use separate Compose files to make the selected environment explicit.
 
-## CLI Options
+### Local Docker build
 
-```
-Usage: snap2dbml [options] [file]
+`docker-compose.dev.yml` builds an image from the current checkout and exposes it on port `3001`:
 
-Arguments:
-  file                      Path to snapshot file (reads stdin if omitted or '-')
-
-Options:
-  -o, --output <file>       Write output to file (default: stdout)
-  --stdout                  Explicitly output to stdout
-  --md                      Also generate a Markdown collection description file alongside DBML
-  --include-system          Include Directus system collections (directus_*)
-  --include-comments        Include table/column comments from meta.note
-  --max-size <mb>           Maximum input size in MB (default: 50)
-  --fail-on-circular        Exit with error code 5 on circular references
-  --suppress-warnings       Suppress warning messages to stderr
-  -v, --verbose             Show stats/metadata as JSON after output
-  -q, --quiet               Suppress all non-error output
-  --version                 Show version number
-  -h, --help                Show help
+```bash
+cp .env.example .env
+# Set API_KEY in .env
+docker compose -f docker-compose.dev.yml up -d --build
+curl http://localhost:3001/health
 ```
 
-### Exit Codes
+This configuration validates the local Docker build. It does not mount source files or provide hot reload.
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Invalid input / processing error |
-| 2 | File not found |
-| 3 | Permission denied |
-| 4 | Input file too large |
-| 5 | Circular reference detected (with `--fail-on-circular`) |
+### Production deployment
 
-## Library Options
+`docker-compose.yml` pulls the published `:prod` image and exposes it on port `3000`:
+
+```bash
+cp .env.example .env
+# Set API_KEY and GHCR_OWNER in .env
+docker compose pull
+docker compose up -d
+curl http://localhost:3000/health
+```
+
+GitHub Actions publishes images for pushes to the `stage` and `prod` branches. Each build receives the branch tag and an immutable `sha-<short>` tag. No `latest` tag is published. Set `IMAGE_TAG=sha-...` in `.env` to pin production to an immutable build.
+
+### Staging deployment
+
+`docker-compose.stage.yml` pulls the `:stage` image and runs alongside production on port `3001`:
+
+```bash
+cp .env.example .env.stage
+# Set a separate API_KEY in .env.stage
+docker compose -f docker-compose.stage.yml -p snap2dbml-stage pull
+docker compose -f docker-compose.stage.yml -p snap2dbml-stage up -d
+curl http://localhost:3001/health
+```
+
+The separate Compose project name prevents staging commands from modifying the production container. A staging scheduler must use a sandbox repository or a separate branch and directory; it must never manage production paths.
+
+Local Docker and staging both use host port `3001`, so they cannot run simultaneously unless one port mapping is changed.
+
+### Docker environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `GHCR_OWNER` | GitHub account or organization that owns the container image. |
+| `IMAGE_TAG` | Production image tag. Default: `prod`; may be an immutable `sha-*` tag. |
+| `STAGE_IMAGE_TAG` | Staging image tag. Default: `stage`. |
+| `PORT` | Internal HTTP listening port. The Compose files keep it at `3000`. |
+| `API_KEY` | HTTP API key. Use different values for production and staging. |
+| `SYNC_CONFIG` | Path to the sync configuration inside the container. |
+
+### Scheduled sync in Docker
+
+Set the scheduler variables in the environment file:
+
+```bash
+SYNC_CONFIG=/app/sync.json
+DIRECTUS_TOKEN=your-directus-token
+GITHUB_TOKEN=your-github-token
+```
+
+Mount the matching configuration into the container by enabling the volume in the relevant Compose file:
+
+```yaml
+volumes:
+  - ./sync.json:/app/sync.json:ro
+```
+
+For staging, use a separate `sync.stage.json` and mount it at the path specified by `.env.stage`.
+
+## Library API
+
+### Conversion
+
+```typescript
+import {
+  buildConversionArtifacts,
+  convertSnapshot,
+  convertSnapshotString,
+  convertSnapshotToMarkdown,
+  convertSnapshotWithStats,
+} from 'snap2dbml';
+
+const dbmlFromObject = convertSnapshot(snapshotObject);
+const dbmlFromString = convertSnapshotString(snapshotJson);
+
+const result = convertSnapshotWithStats(snapshotObject, {
+  includeSystem: false,
+  includeComments: true,
+});
+
+const markdown = convertSnapshotToMarkdown(snapshotObject);
+
+const artifacts = buildConversionArtifacts(
+  snapshotObject,
+  { includeComments: true },
+  true,
+);
+// artifacts.dbml
+// artifacts.markdown
+// artifacts.warnings
+// artifacts.stats
+// artifacts.metadata
+```
+
+### Conversion options
 
 ```typescript
 interface ConvertOptions {
   includeSystem?: boolean;           // Include directus_* tables (default: false)
   includeComments?: boolean;         // Include meta.note as DBML comments (default: false)
-  maxSizeBytes?: number;             // Max input size (default: 50MB)
-  maxDepth?: number;                 // Max JSON nesting depth (default: 100)
+  maxSizeBytes?: number;             // Maximum input size (default: 50 MB)
+  maxDepth?: number;                 // Maximum JSON nesting depth (default: 100)
   suppressWarnings?: boolean;        // Suppress stderr warnings
   failOnCircularReference?: boolean; // Throw on circular references
 }
 ```
 
-## Example Output
+### Error handling
+
+```typescript
+import {
+  CircularReferenceError,
+  FileTooLargeError,
+  InvalidSnapshotError,
+  ValidationError,
+} from 'snap2dbml';
+```
+
+Unknown field types map to `text` with a warning instead of aborting conversion.
+
+## Output examples
 
 Given a Directus snapshot, snap2dbml produces DBML:
 
@@ -240,9 +435,9 @@ Table broker_licenses {
 Ref: broker_licenses.broker_id > brokers.id
 ```
 
-Virtual relationship aliases (O2M, M2M) are rendered as `virtual` columns with a note showing the relationship type and target collection, making them visible in tools like ChartDB.
+Virtual O2M and M2M aliases are rendered as `virtual` columns with notes, making them visible in tools such as ChartDB.
 
-With `--md` (or `generateMarkdown: true` in settings), snap2dbml additionally generates a Markdown file describing each collection's fields:
+Markdown generation produces collection field tables:
 
 ```markdown
 ### `brokers`
@@ -265,81 +460,55 @@ With `--md` (or `generateMarkdown: true` in settings), snap2dbml additionally ge
 
 ## Features
 
-- **Directus v10.x and v11.x** snapshot support
-- **All standard field types** — uuid, string, integer, float, decimal, boolean, timestamp, json, and more
-- **Relationships** — M2O, O2M, M2M, and O2O with proper DBML `Ref:` syntax
-- **M2M junction tables** with metadata columns
-- **Markdown output** — generates a human-readable `.md` file with per-collection field tables (Field, Type, Required, Relation, Settings) alongside DBML via `--md` or `generateMarkdown` in settings
-- **HTTP backend service** — stateless REST API for use with n8n, CI/CD pipelines, or any HTTP client; deployable via Docker
-- **Deterministic output** — byte-for-byte identical DBML for the same input, suitable for diffing and CI/CD
-- **Circular reference detection** with optional fail-on-circular mode
-- **System collection filtering** — excludes `directus_*` tables by default
-- **UTF-8 support** for non-ASCII collection and field names
-- **Zero runtime dependencies** beyond `commander` for CLI parsing
-
-## Error Handling
-
-snap2dbml provides typed error classes for programmatic use:
-
-```typescript
-import {
-  InvalidSnapshotError,
-  FileTooLargeError,
-  CircularReferenceError,
-  UnsupportedFieldError,
-  ValidationError,
-} from 'snap2dbml';
-```
-
-Unknown field types are handled gracefully — they map to `text` with a warning, rather than failing the conversion.
+- Directus v10.x+ snapshot support
+- PostgreSQL and Directus field type mapping
+- M2O, O2M, M2M, and constraint-based O2O relationship detection
+- M2M junction tables with metadata columns
+- Optional Markdown collection documentation
+- Deterministic output suitable for Git diffs and CI/CD
+- Automated single-commit GitHub sync with optional Telegram notifications
+- Circular-reference detection and configurable failure behavior
+- Directus system collection filtering
+- UTF-8 collection and field names
+- Stateless authenticated HTTP API
+- Docker images for staging and production
 
 ## Development
 
 ```bash
-# Build
-npm run build
-
-# Run tests
-npm test
-
-# Watch mode
-npm run test:watch
-
-# Coverage
-npm run test:coverage
-
-# Fuzz testing
-npm run test:fuzz
-
-# Type checking
-npm run typecheck
-
-# Benchmarks
-npm run benchmark
+npm run build          # Build
+npm test               # Run tests
+npm run test:watch     # Watch mode
+npm run test:coverage  # Coverage
+npm run test:fuzz      # Fuzz tests
+npm run typecheck      # TypeScript checks
+npm run benchmark      # Benchmarks
 ```
 
 ## Architecture
 
-The conversion pipeline:
-
-```
+```text
 JSON Input → Parser → Transformer → DBML Generator → DBML Output
                                  ↘ MD Generator  → Markdown Output (optional)
 
-HTTP POST /convert → [same pipeline] → JSON response { dbml, md }
+HTTP POST /convert → same pipeline → JSON response { dbml, md }
+
+snap2dbml sync → Directus API → same pipeline → GitHub API (single commit)
+                                                 ↘ Telegram notification (optional)
 ```
 
-1. **Parser** — validates structure, enforces size/depth limits, checks Directus version compatibility
-2. **Transformer** — filters system collections, maps field types, resolves relationships, detects circular references
-3. **DBML Generator** — produces sorted, deterministic DBML with proper escaping
-4. **MD Generator** — produces a Markdown document with per-collection field tables (enabled via `--md`, `generateMarkdown` setting, or `generateMarkdown: true` in HTTP request)
-5. **HTTP Server** — stateless Node.js HTTP server wrapping the same pipeline; authenticated via `X-API-Key` header
+1. **Parser** validates structure, size, depth, and supported Directus versions.
+2. **Transformer** filters collections, maps types, resolves relationships, and detects circular references.
+3. **DBML Generator** creates sorted deterministic DBML with escaping.
+4. **MD Generator** creates per-collection Markdown field tables.
+5. **HTTP Server** exposes the conversion pipeline through an authenticated REST API.
+6. **Sync Engine** fetches Directus snapshots and atomically updates GitHub on demand or on a schedule.
 
 ## Performance
 
-| Schema Size | Target |
+| Schema size | Target |
 |-------------|--------|
-| 50 collections, 500 fields | < 500ms |
-| 200 collections, 2,000 fields | < 2s |
-| Memory (200 collections) | < 100MB heap |
-| Bundled package size | ~27KB |
+| 50 collections, 500 fields | < 500 ms |
+| 200 collections, 2,000 fields | < 2 s |
+| Memory with 200 collections | < 100 MB heap |
+| Bundled package size | ~27 KB |

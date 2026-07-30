@@ -1,19 +1,47 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildConversionArtifacts } from './conversion.js';
+import { Snap2DBMLError } from './errors.js';
+import { createLogger } from './logger.js';
+import type { Logger } from './logger.js';
+import { SyncScheduler } from './scheduler.js';
+import { StatusRegistry } from './status.js';
+import { loadSyncConfig } from './sync-config.js';
+import { LIBRARY_VERSION } from './version.js';
 import type { ConvertOptions, DirectusSnapshot } from './types.js';
 
-const DEFAULT_PORT = parseInt(process.env.PORT ?? '3000', 10);
 const DEFAULT_API_KEY = process.env.API_KEY ?? '';
 const DEFAULT_MAX_BODY_BYTES = 52_428_800; // 50 MB
+
+function resolvePort(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return 3000;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error(`Invalid PORT: "${raw}" (expected an integer between 0 and 65535)`);
+  }
+  return port;
+}
+
+function isApiKeyValid(provided: string | string[] | undefined, expected: string): boolean {
+  if (typeof provided !== 'string') return false;
+  const providedBuf = Buffer.from(provided);
+  const expectedBuf = Buffer.from(expected);
+  if (providedBuf.length !== expectedBuf.length) return false;
+  return timingSafeEqual(providedBuf, expectedBuf);
+}
 
 export interface ServerConfig {
   port?: number;
   apiKey?: string;
   maxBodyBytes?: number;
-  logger?: Pick<NodeJS.WritableStream, 'write'>;
+  logger?: Logger;
+  /** Sync activity registry exposed via GET /status. */
+  registry?: StatusRegistry;
+  /** Whether a sync scheduler is running; reported by GET /status. */
+  schedulerActive?: boolean;
 }
 
 interface ConvertRequest {
@@ -88,11 +116,36 @@ function send(res: ServerResponse, status: number, body: unknown): void {
   res.end(json);
 }
 
+function logRequest(req: IncomingMessage, res: ServerResponse, logger: Logger): void {
+  const startedAt = performance.now();
+  res.on('finish', () => {
+    // Strip the query string: it may carry sensitive values and adds noise
+    const path = (req.url ?? '').split('?')[0];
+    const fields = {
+      method: req.method,
+      path,
+      status: res.statusCode,
+      durationMs: Math.round(performance.now() - startedAt),
+    };
+    // Healthchecks poll every 30s; keep them out of the default log stream
+    if (path === '/health') {
+      logger.debug('Request', fields);
+    } else {
+      logger.info('Request', fields);
+    }
+  });
+}
+
 export function createAppServer(config: ServerConfig = {}): Server {
   const apiKey = config.apiKey ?? DEFAULT_API_KEY;
   const maxBodyBytes = config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  const logger = config.logger ?? createLogger();
+  const httpLogger = logger.child('http');
+  const startedAt = Date.now();
 
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    logRequest(req, res, httpLogger);
+
     // Health check — no auth required
     if (req.method === 'GET' && req.url === '/health') {
       return send(res, 200, { status: 'ok' });
@@ -100,10 +153,21 @@ export function createAppServer(config: ServerConfig = {}): Server {
 
     // Auth
     if (apiKey) {
-      const provided = req.headers['x-api-key'];
-      if (provided !== apiKey) {
+      if (!isApiKeyValid(req.headers['x-api-key'], apiKey)) {
         return send(res, 401, { error: 'Unauthorized' });
       }
+    }
+
+    if (req.method === 'GET' && req.url === '/status') {
+      const registry = config.registry;
+      return send(res, 200, {
+        status: 'ok',
+        version: LIBRARY_VERSION,
+        uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+        scheduler: config.schedulerActive ?? false,
+        targets: registry ? registry.targets() : [],
+        recentLogs: registry ? registry.recentLogs() : [],
+      });
     }
 
     if (req.method !== 'POST' || req.url !== '/convert') {
@@ -149,19 +213,47 @@ export function createAppServer(config: ServerConfig = {}): Server {
         metadata: result.metadata,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Conversion failed';
-      return send(res, 422, { error: message });
+      // Known conversion errors are the client's fault; anything else is an internal
+      // error and must not leak its message to the client
+      if (err instanceof Snap2DBMLError) {
+        return send(res, 422, { error: err.message });
+      }
+      httpLogger.error('Internal error', { err });
+      return send(res, 500, { error: 'Internal server error' });
     }
   });
 }
 
 export function startServer(config: ServerConfig = {}): Server {
-  const server = createAppServer(config);
-  const port = config.port ?? DEFAULT_PORT;
-  const logger = config.logger ?? process.stderr;
+  const registry = config.registry ?? new StatusRegistry();
+  const logger = config.logger
+    ?? createLogger({ onRecord: (record) => registry.pushLog(record) });
+
+  let scheduler: SyncScheduler | undefined;
+  const syncConfigPath = process.env.SYNC_CONFIG;
+  if (syncConfigPath) {
+    try {
+      const syncConfig = loadSyncConfig(syncConfigPath);
+      scheduler = new SyncScheduler(syncConfig.syncs, logger, registry);
+    } catch (err) {
+      logger.error('Failed to start scheduler', { err });
+    }
+  }
+
+  const server = createAppServer({
+    ...config,
+    logger,
+    registry,
+    schedulerActive: scheduler !== undefined,
+  });
+  const port = config.port ?? resolvePort(process.env.PORT);
 
   server.listen(port, () => {
-    logger.write(`snap2dbml server listening on port ${port}\n`);
+    logger.info('Server listening', { port });
+    if (scheduler) {
+      scheduler.start();
+      server.once('close', () => scheduler.stop());
+    }
   });
 
   return server;

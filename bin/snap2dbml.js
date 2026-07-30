@@ -5,13 +5,13 @@ import { readFileSync, writeFileSync, readdirSync, unlinkSync, accessSync, statS
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  convertSnapshotWithStats,
-  convertSnapshotToMarkdown,
+  buildConversionArtifacts,
   Snap2DBMLError,
   InvalidSnapshotError,
   FileTooLargeError,
   ValidationError,
 } from '../dist/index.js';
+import { createLogger, loadSyncConfig, SyncScheduler } from '../dist/sync.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(resolve(__dirname, '..', 'package.json'), 'utf-8'));
@@ -116,8 +116,8 @@ program
         suppressWarnings: true, // We handle warnings ourselves in the CLI
       };
 
-      // Always convert to DBML
-      const result = convertSnapshotWithStats(snapshot, convertOptions);
+      // Convert to DBML (and Markdown in the same pass when requested)
+      const result = buildConversionArtifacts(snapshot, convertOptions, generateMd);
 
       // Determine output paths for DBML and Markdown
       let outputPath;
@@ -166,10 +166,9 @@ program
         process.stdout.write(result.dbml);
       }
 
-      // Generate and write Markdown alongside DBML (only when writing to a file)
-      if (generateMd && mdPath) {
-        const mdResult = convertSnapshotToMarkdown(snapshot, convertOptions);
-        writeFileSync(mdPath, mdResult.markdown, 'utf-8');
+      // Write Markdown alongside DBML (only when writing to a file)
+      if (generateMd && mdPath && result.markdown !== undefined) {
+        writeFileSync(mdPath, result.markdown, 'utf-8');
         if (!quiet) {
           process.stderr.write(`Written to: ${mdPath}\n`);
         }
@@ -188,6 +187,35 @@ program
       }
     } catch (err) {
       handleError(err, opts.quiet);
+    }
+  });
+
+program
+  .command('sync')
+  .description('Fetch Directus snapshots and push to GitHub in a single commit')
+  .option('--config <file>', 'Path to sync config JSON', 'sync.json')
+  .option('--name <name>', 'Run only the named sync target (runs all if omitted)')
+  .action(async (opts) => {
+    let config;
+    try {
+      config = loadSyncConfig(opts.config);
+    } catch (err) {
+      process.stderr.write(`snap2dbml sync: ${err instanceof Error ? err.message : err}\n`);
+      process.exit(1);
+    }
+
+    // Human-readable output for interactive one-shot runs; stdout stays clean
+    const logger = createLogger({ format: 'text', stream: process.stderr });
+    const scheduler = new SyncScheduler(config.syncs, logger);
+    try {
+      if (opts.name) {
+        await scheduler.runByName(opts.name);
+      } else {
+        await scheduler.runAll();
+      }
+    } catch (err) {
+      process.stderr.write(`snap2dbml sync: ${err instanceof Error ? err.message : err}\n`);
+      process.exit(1);
     }
   });
 

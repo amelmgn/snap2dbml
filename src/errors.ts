@@ -26,25 +26,6 @@ export class InvalidSnapshotError extends Snap2DBMLError {
   }
 }
 
-export class UnsupportedFieldError extends Snap2DBMLError {
-  readonly code = 'UNSUPPORTED_FIELD_TYPE';
-  readonly fieldName: string;
-  readonly fieldType: string;
-
-  getExitCode(): number {
-    return 0;
-  }
-
-  constructor(fieldName: string, fieldType: string) {
-    super(
-      `Unknown field type '${fieldType}' for field '${fieldName}'. Mapped to 'text'.`,
-      `Check if '${fieldType}' is a valid Directus field type.`,
-    );
-    this.fieldName = fieldName;
-    this.fieldType = fieldType;
-  }
-}
-
 export class CircularReferenceError extends Snap2DBMLError {
   readonly code = 'CIRCULAR_REFERENCE';
   readonly chain: string[];

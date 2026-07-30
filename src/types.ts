@@ -41,6 +41,7 @@ export interface DirectusField {
     data_type: string;
     default_value?: unknown;
     is_nullable: boolean;
+    is_unique?: boolean;
     is_primary_key: boolean;
     has_auto_increment?: boolean;
     max_length?: number | null;

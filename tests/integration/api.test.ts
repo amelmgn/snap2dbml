@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 import { duplexPair } from 'node:stream';
 import { createAppServer } from '../../src/server.js';
 import type { ServerConfig } from '../../src/server.js';
+import { StatusRegistry } from '../../src/status.js';
+import { captureLogger } from '../helpers/capture-logger.js';
 import type { DirectusSnapshot } from '../../src/types.js';
 
 const fixturesDir = resolve(import.meta.dirname, '../fixtures');
@@ -169,5 +171,71 @@ describe('HTTP API', () => {
     expect(JSON.parse(response.body)).toMatchObject({
       error: expect.stringContaining('version'),
     });
+  });
+
+  it('enforces auth on /status and reports sync state and recent logs', async () => {
+    const registry = new StatusRegistry();
+    registry.recordStart('demo');
+    registry.recordSuccess('demo', true);
+    registry.pushLog({ time: new Date().toISOString(), level: 'info', msg: 'hello' });
+    const server = createAppServer({ apiKey: 'secret', registry, schedulerActive: true });
+
+    const unauthorized = await sendHttpRequest(server, { path: '/status' });
+    expect(unauthorized.status).toBe(401);
+
+    const response = await sendHttpRequest(server, {
+      path: '/status',
+      headers: { 'X-API-Key': 'secret' },
+    });
+    expect(response.status).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body).toMatchObject({
+      status: 'ok',
+      version: pkg.version,
+      scheduler: true,
+      targets: [
+        expect.objectContaining({ name: 'demo', lastOutcome: 'success', lastCommitted: true }),
+      ],
+      recentLogs: [expect.objectContaining({ msg: 'hello' })],
+    });
+    expect(body.uptimeSeconds).toBeGreaterThanOrEqual(0);
+  });
+
+  it('returns an empty /status when no scheduler is configured', async () => {
+    const response = await sendHttpRequest(createAppServer(), { path: '/status' });
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject({
+      scheduler: false,
+      targets: [],
+      recentLogs: [],
+    });
+  });
+
+  it('logs requests with method, path, status, and duration', async () => {
+    const { logger, records } = captureLogger();
+    const server = createAppServer({ logger });
+
+    await sendHttpRequest(server, {
+      method: 'POST',
+      path: '/convert',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"snapshot":',
+    });
+    await sendHttpRequest(server, { path: '/unknown?token=secret' });
+    await sendHttpRequest(server, { path: '/health' });
+
+    const convertLog = records.find(r => r.scope === 'http' && r.path === '/convert');
+    expect(convertLog).toMatchObject({
+      level: 'info',
+      msg: 'Request',
+      method: 'POST',
+      status: 400,
+    });
+    expect(typeof convertLog?.durationMs).toBe('number');
+
+    // The query string is stripped and health checks log at debug
+    expect(records.some(r => String(r.path ?? '').includes('token'))).toBe(false);
+    expect(records.find(r => r.path === '/health')).toMatchObject({ level: 'debug' });
   });
 });

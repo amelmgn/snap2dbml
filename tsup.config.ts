@@ -19,4 +19,13 @@ export default defineConfig([
     minify: false,
     target: 'node18',
   },
+  {
+    entry: ['src/sync.ts'],
+    format: ['esm'],
+    dts: false,
+    clean: false,
+    sourcemap: true,
+    minify: false,
+    target: 'node18',
+  },
 ]);
