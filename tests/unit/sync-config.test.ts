@@ -109,6 +109,42 @@ describe('schedule validation at config load', () => {
     expect(loadSyncConfig(path).syncs[0].telegram).toEqual(telegram);
   });
 
+  it('accepts custom Telegram message templates', () => {
+    const telegram = {
+      botToken: 'bot-token',
+      chatId: 'chat-id',
+      messages: {
+        success: '{{name}} updated at {{time}}',
+        noChanges: '{{name}} has no changes',
+        failure: '{{name}} failed: {{error}}',
+      },
+    };
+    const path = writeConfig({ ...validTarget, telegram });
+    expect(loadSyncConfig(path).syncs[0].telegram).toEqual(telegram);
+  });
+
+  it('rejects invalid Telegram message templates', () => {
+    const invalidMessages = writeConfig({
+      ...validTarget,
+      telegram: { botToken: 'bot-token', chatId: 'chat-id', messages: 'custom' },
+    });
+    expect(() => loadSyncConfig(invalidMessages)).toThrow(
+      /telegram\.messages must be an object/,
+    );
+
+    const emptySuccess = writeConfig({
+      ...validTarget,
+      telegram: {
+        botToken: 'bot-token',
+        chatId: 'chat-id',
+        messages: { success: '' },
+      },
+    });
+    expect(() => loadSyncConfig(emptySuccess)).toThrow(
+      /telegram\.messages\.success is required and must be a non-empty string/,
+    );
+  });
+
   it('rejects incomplete Telegram configuration and unknown notification modes', () => {
     const missingToken = writeConfig({
       ...validTarget,

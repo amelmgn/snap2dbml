@@ -449,13 +449,18 @@ interface SyncTarget {
     botToken: string;
     chatId: string;
     notifyOn?: 'success' | 'failure' | 'always'; // Default: 'success'
+    messages?: {
+      success?: string;             // GitHub commit created
+      noChanges?: string;           // Successful run without a commit
+      failure?: string;             // Failed run
+    };
   };
   generateMarkdown?: boolean;      // Default: false
   convertOptions?: ConvertOptions;
 }
 ```
 
-`loadSyncConfig(path)` loads the JSON file, substitutes `${ENV_VAR}` placeholders from `process.env`, and validates all required fields plus name uniqueness. Telegram configuration is optional; when present, its credentials and notification mode are validated at load time.
+`loadSyncConfig(path)` loads the JSON file, substitutes `${ENV_VAR}` placeholders from `process.env`, and validates all required fields plus name uniqueness. Telegram configuration is optional; when present, its credentials, notification mode, and message templates are validated at load time. Each optional template supports `{{name}}` and `{{time}}`; `{{error}}` contains the sanitized, bounded error reason for failures. Missing templates preserve the built-in messages that predate template configuration.
 
 #### GitHub Client (`src/github-client.ts`)
 
@@ -482,7 +487,7 @@ This produces exactly **one commit** regardless of how many files are added, upd
 6. On success, send Telegram notification when `notifyOn` is `success` or `always`. A successful no-change run (`committed: false`) is still a success and is notified.
 7. On failure, send Telegram notification when `notifyOn` is `failure` or `always`, then rethrow the original sync error.
 
-Telegram delivery is non-fatal: transport and non-2xx errors are logged without changing the sync outcome. Failure messages contain a bounded error reason and do not include credentials or snapshot payloads. The internal `src/telegram.ts` module owns delivery and notification-policy matching.
+Telegram delivery is non-fatal: transport and non-2xx errors are logged without changing the sync outcome. Failure messages contain a bounded error reason and do not include credentials or snapshot payloads. The internal `src/telegram.ts` module owns default templates, placeholder rendering, delivery, and notification-policy matching.
 
 #### Scheduler (`src/scheduler.ts`)
 

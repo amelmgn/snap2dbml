@@ -1,9 +1,38 @@
 import type { Logger } from './logger.js';
-import type { TelegramNotificationMode, TelegramSyncConfig } from './sync-config.js';
+import type {
+  TelegramMessageTemplates,
+  TelegramNotificationMode,
+  TelegramSyncConfig,
+} from './sync-config.js';
 
 const TELEGRAM_TIMEOUT_MS = 30_000;
 
 export type SyncNotificationOutcome = 'success' | 'failure';
+export type TelegramMessageKind = 'success' | 'noChanges' | 'failure';
+
+export const DEFAULT_TELEGRAM_MESSAGES: Required<TelegramMessageTemplates> = {
+  success: '✅ [{{name}}] Directus schema updated at {{time}}',
+  noChanges: '✅ [{{name}}] Sync completed successfully; no schema changes detected at {{time}}',
+  failure: '❌ [{{name}}] Directus schema sync failed at {{time}}\n{{error}}',
+};
+
+interface TelegramMessageValues {
+  name: string;
+  time: string;
+  error?: string;
+}
+
+export function renderTelegramMessage(
+  config: TelegramSyncConfig,
+  kind: TelegramMessageKind,
+  values: TelegramMessageValues,
+): string {
+  const template = config.messages?.[kind] ?? DEFAULT_TELEGRAM_MESSAGES[kind];
+  return template
+    .replaceAll('{{name}}', values.name)
+    .replaceAll('{{time}}', values.time)
+    .replaceAll('{{error}}', values.error ?? '');
+}
 
 export function shouldSendTelegramNotification(
   mode: TelegramNotificationMode | undefined,

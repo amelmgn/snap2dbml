@@ -130,7 +130,12 @@ describe('runSync', () => {
 
     const syncTarget: SyncTarget = {
       ...target,
-      telegram: { botToken: 'bot-token', chatId: 'chat-id', notifyOn: 'success' },
+      telegram: {
+        botToken: 'bot-token',
+        chatId: 'chat-id',
+        notifyOn: 'success',
+        messages: { noChanges: 'No changes for {{name}} at {{time}}' },
+      },
     };
     const { committed } = await runSync(syncTarget, captureLogger().logger);
 
@@ -141,7 +146,7 @@ describe('runSync', () => {
     expect(telegramRequest).toBeDefined();
     expect(JSON.parse(String(telegramRequest?.init?.body))).toMatchObject({
       chat_id: 'chat-id',
-      text: expect.stringContaining('Sync completed successfully; no schema changes detected'),
+      text: 'No changes for test at 2026-07-30 00:00:02 UTC',
     });
   });
 
@@ -163,7 +168,12 @@ describe('runSync', () => {
 
       const syncTarget: SyncTarget = {
         ...target,
-        telegram: { botToken: 'bot-token', chatId: 'chat-id', notifyOn },
+        telegram: {
+          botToken: 'bot-token',
+          chatId: 'chat-id',
+          notifyOn,
+          messages: { failure: 'Sync {{name}} failed: {{error}}' },
+        },
       };
       const { logger, records } = captureLogger();
 
@@ -175,7 +185,7 @@ describe('runSync', () => {
       ));
       expect(JSON.parse(String(telegramRequest?.init?.body))).toMatchObject({
         chat_id: 'chat-id',
-        text: expect.stringContaining('Directus schema sync failed'),
+        text: 'Sync test failed: Directus snapshot fetch failed: HTTP 401 ',
       });
       expect(records).toContainEqual(expect.objectContaining({
         level: 'warn',

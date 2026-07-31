@@ -11,6 +11,7 @@ import type { Logger } from './logger.js';
 import { resolveGitHubRepository } from './sync-config.js';
 import type { SyncTarget } from './sync-config.js';
 import {
+  renderTelegramMessage,
   sendTelegramNotification,
   shouldSendTelegramNotification,
 } from './telegram.js';
@@ -157,12 +158,13 @@ export async function runSync(
   try {
     const result = await performSync(target, logger);
     if (telegram && shouldSendTelegramNotification(telegram.notifyOn, 'success')) {
-      const outcome = result.committed
-        ? 'Directus schema updated'
-        : 'Sync completed successfully; no schema changes detected';
       await sendTelegramNotification(
         telegram,
-        `✅ [${name}] ${outcome} at ${formatNotificationTime(new Date())}`,
+        renderTelegramMessage(
+          telegram,
+          result.committed ? 'success' : 'noChanges',
+          { name, time: formatNotificationTime(new Date()) },
+        ),
         logger,
       );
     }
@@ -171,7 +173,11 @@ export async function runSync(
     if (telegram && shouldSendTelegramNotification(telegram.notifyOn, 'failure')) {
       await sendTelegramNotification(
         telegram,
-        `❌ [${name}] Directus schema sync failed at ${formatNotificationTime(new Date())}\n${formatFailureReason(err, target)}`,
+        renderTelegramMessage(telegram, 'failure', {
+          name,
+          time: formatNotificationTime(new Date()),
+          error: formatFailureReason(err, target),
+        }),
         logger,
       );
     }

@@ -95,7 +95,12 @@ cp sync.example.json sync.json
       "telegram": {
         "botToken": "${TELEGRAM_BOT_TOKEN}",
         "chatId": "YOUR_CHAT_ID",
-        "notifyOn": "always"
+        "notifyOn": "always",
+        "messages": {
+          "success": "✅ [{{name}}] Directus schema updated at {{time}}",
+          "noChanges": "✅ [{{name}}] Sync completed successfully; no schema changes detected at {{time}}",
+          "failure": "❌ [{{name}}] Directus schema sync failed at {{time}}\n{{error}}"
+        }
       },
       "generateMarkdown": true
     }
@@ -125,6 +130,16 @@ Add more objects to `syncs` to manage multiple repositories. Each target has an 
 | `always` | Notify after both successful and failed syncs. |
 
 Telegram delivery is non-fatal: a delivery error is logged without changing the sync result. Failure messages contain a concise error reason and never include configured credentials or snapshot payloads.
+
+`telegram.messages` optionally customizes the text for each outcome. Omitted fields use the texts shown in the example above, so existing configurations keep their current messages. Templates support these placeholders:
+
+| Placeholder | Value |
+|-------------|-------|
+| `{{name}}` | Sync target name. |
+| `{{time}}` | Completion time in UTC. |
+| `{{error}}` | Sanitized, bounded failure reason. Intended for the `failure` template. |
+
+`success` is used when a GitHub commit is created, `noChanges` when a sync succeeds without a new commit, and `failure` when the sync fails. A template may omit any placeholder.
 
 Run configured targets manually:
 

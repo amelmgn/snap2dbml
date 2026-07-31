@@ -67,11 +67,22 @@ export function resolveGitHubRepository(
 
 export type TelegramNotificationMode = 'success' | 'failure' | 'always';
 
+export interface TelegramMessageTemplates {
+  /** Used after a sync that created a GitHub commit. */
+  success?: string;
+  /** Used after a successful sync that did not create a GitHub commit. */
+  noChanges?: string;
+  /** Used after a failed sync. */
+  failure?: string;
+}
+
 export interface TelegramSyncConfig {
   botToken: string;
   chatId: string;
   /** Which completed sync outcomes trigger a notification. Default: "success". */
   notifyOn?: TelegramNotificationMode;
+  /** Optional notification templates. Missing values use the built-in English messages. */
+  messages?: TelegramMessageTemplates;
 }
 
 export interface SyncTarget {
@@ -213,6 +224,17 @@ function validateSyncTargets(syncs: unknown[]): void {
         throw new Error(
           `${ctx}.telegram.notifyOn must be one of "success", "failure", or "always"`,
         );
+      }
+      if (telegram.messages !== undefined) {
+        if (!telegram.messages || typeof telegram.messages !== 'object') {
+          throw new Error(`${ctx}.telegram.messages must be an object`);
+        }
+        const messages = telegram.messages as Record<string, unknown>;
+        for (const field of ['success', 'noChanges', 'failure']) {
+          if (messages[field] !== undefined) {
+            requireString(messages, field, `${ctx}.telegram.messages`);
+          }
+        }
       }
     }
   }
