@@ -17,7 +17,12 @@
       "telegram": {
         "botToken": "${TELEGRAM_BOT_TOKEN}",
         "chatId": "YOUR_CHAT_ID",
-        "notifyOn": "always"
+        "notifyOn": "always",
+        "messages": {
+          "success": "✅ [{{name}}] Directus schema updated at {{time}}",
+          "noChanges": "✅ [{{name}}] Sync completed successfully; no schema changes detected at {{time}}",
+          "failure": "❌ [{{name}}] Directus schema sync failed at {{time}}\n{{error}}"
+        }
       },
       "generateMarkdown": true
     },

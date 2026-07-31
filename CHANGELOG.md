@@ -1,5 +1,9 @@
 ## 2.0.0 [2026-07-30]
 
+Added configurable Telegram message templates for sync runs that create a commit, complete without changes, or fail. Templates support `{{name}}`, `{{time}}`, and `{{error}}` placeholders; every field is optional and retains the existing English notification text by default.
+
+Updated files: `src/sync-config.ts`, `src/syncer.ts`, `src/sync.ts`, `src/telegram.ts`, `sync.example.json`, `README.md`, `docs/tech-spec.md`, `tests/unit/sync-config.test.ts`, `tests/unit/syncer.test.ts`, `tests/unit/telegram.test.ts`.
+
 Added configurable Telegram notification outcomes for automated sync targets. `telegram.notifyOn` accepts `success`, `failure`, or `always` and defaults to `success` for existing configurations. Success covers every completed sync, including runs where GitHub needs no new commit; failure notifications preserve the original sync error and Telegram delivery remains non-fatal. Telegram configuration is now validated when `sync.json` is loaded.
 
 Updated files: `src/sync-config.ts`, `src/syncer.ts`, `src/sync.ts`, `src/telegram.ts`, `sync.example.json`, `README.md`, `docs/tech-spec.md`, `tests/unit/sync-config.test.ts`, `tests/unit/syncer.test.ts`, `tests/unit/telegram.test.ts`.

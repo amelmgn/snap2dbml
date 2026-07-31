@@ -10,6 +10,7 @@ export type {
   SyncTarget,
   DirectusSyncConfig,
   GitHubSyncConfig,
+  TelegramMessageTemplates,
   TelegramNotificationMode,
   TelegramSyncConfig,
 } from './sync-config.js';
