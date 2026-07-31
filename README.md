@@ -136,7 +136,7 @@ Telegram delivery is non-fatal: a delivery error is logged without changing the 
 | Placeholder | Value |
 |-------------|-------|
 | `{{name}}` | Sync target name. |
-| `{{time}}` | Completion time in UTC. |
+| `{{time}}` | Completion time in the target's configured `timezone`. |
 | `{{error}}` | Sanitized, bounded failure reason. Intended for the `failure` template. |
 
 `success` is used when a GitHub commit is created, `noChanges` when a sync succeeds without a new commit, and `failure` when the sync fails. A template may omit any placeholder.
@@ -154,13 +154,15 @@ snap2dbml sync --config sync.json --name my-project
 Each successful sync commit contains:
 
 - the updated `snapshot.json`;
-- a new `schema_YYYYMMDD_HHMMSS.dbml` using a UTC timestamp;
+- a new `schema_YYYYMMDD_HHMMSS.dbml` using the target's configured timestamp timezone;
 - a matching `description_YYYYMMDD_HHMMSS.md` when Markdown generation is enabled;
 - deletion of previous `.dbml` and `.md` artifacts from the managed `schemaDir`.
 
 The directory listing and commit use the same branch revision. If another scheduler updates the branch concurrently, sync reads the new HEAD and retries. Identical Git trees are not committed. With the default `telegram.notifyOn: "success"`, both committed and no-change runs produce a success notification.
 
-Scheduling uses [croner](https://github.com/hexagon/croner). Cron expressions support values, ranges (`1-5`), wildcards (`*`), lists (`1,3,5`), steps (`*/15`, `8-17/2`), day and month names (`MON-FRI`, `JAN`), and the `L` (last), `W` (nearest weekday), and `#` (nth weekday) modifiers. All five fields are evaluated; `7` is accepted as Sunday. An optional `timezone` per target pins the schedule to an IANA timezone (e.g. `"timezone": "Europe/Podgorica"`); without it, schedules run in server-local time. Invalid schedules and timezones are rejected when the configuration is loaded.
+Scheduling uses [croner](https://github.com/hexagon/croner). Cron expressions support values, ranges (`1-5`), wildcards (`*`), lists (`1,3,5`), steps (`*/15`, `8-17/2`), day and month names (`MON-FRI`, `JAN`), and the `L` (last), `W` (nearest weekday), and `#` (nth weekday) modifiers. All five fields are evaluated; `7` is accepted as Sunday.
+
+An optional `timezone` per target sets the IANA timezone for the cron schedule, generated DBML/Markdown filenames, the matching GitHub commit message, and Telegram's `{{time}}` placeholder. For example: `"timezone": "Europe/Podgorica"`. It defaults to `UTC` and is validated when the configuration is loaded.
 
 ### CLI options
 

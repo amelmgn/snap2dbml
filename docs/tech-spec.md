@@ -433,6 +433,7 @@ class ValidationError extends Snap2DBMLError {
 interface SyncTarget {
   name: string;                    // Unique identifier for this target
   schedule: string;                // 5-field cron expression, e.g. "0 0 * * 1-5"
+  timezone?: string;               // Cron and timestamp IANA timezone; default: UTC
   directus: {
     snapshotUrl: string;           // Directus snapshot export URL
     bearerToken: string;           // Directus static token
@@ -460,7 +461,7 @@ interface SyncTarget {
 }
 ```
 
-`loadSyncConfig(path)` loads the JSON file, substitutes `${ENV_VAR}` placeholders from `process.env`, and validates all required fields plus name uniqueness. Telegram configuration is optional; when present, its credentials, notification mode, and message templates are validated at load time. Each optional template supports `{{name}}` and `{{time}}`; `{{error}}` contains the sanitized, bounded error reason for failures. Missing templates preserve the built-in messages that predate template configuration.
+`loadSyncConfig(path)` loads the JSON file, substitutes `${ENV_VAR}` placeholders from `process.env`, and validates all required fields plus name uniqueness. `timezone` controls cron evaluation and timestamps in generated artifact filenames, the matching commit message, and Telegram's `{{time}}` placeholder. It accepts an IANA timezone name, defaults to `UTC`, and is validated at load time. Telegram configuration is optional; when present, its credentials, notification mode, and message templates are validated. Each optional template supports `{{name}}` and `{{time}}`; `{{error}}` contains the sanitized, bounded error reason for failures. Missing templates preserve the built-in messages that predate template configuration.
 
 #### GitHub Client (`src/github-client.ts`)
 
@@ -481,7 +482,7 @@ This produces exactly **one commit** regardless of how many files are added, upd
 `runSync(target)` orchestrates one sync cycle:
 1. Fetch snapshot from Directus (with Bearer auth, 30 s timeout)
 2. Convert via `buildConversionArtifacts` (DBML + optional Markdown)
-3. List existing `(schema|description)_<timestamp>.(dbml|md)` files in `schemaDir` (matches both current `YYYYMMDD_HHMMSS` and legacy `YYMMDD_HHMMSS` formats; new files are named with the UTC timestamp, matching the commit message)
+3. List existing `(schema|description)_<timestamp>.(dbml|md)` files in `schemaDir` (matches both current `YYYYMMDD_HHMMSS` and legacy `YYMMDD_HHMMSS` formats; new files use the target `timezone`, defaulting to UTC, and match the commit message)
 4. Build change list: new `snapshot.json` + new schema files + deletions of old schema files (paths about to be written are excluded from deletions, so a rerun within the same second cannot produce duplicate tree paths)
 5. Call `createSingleCommit` — one commit, one push
 6. On success, send Telegram notification when `notifyOn` is `success` or `always`. A successful no-change run (`committed: false`) is still a success and is notified.

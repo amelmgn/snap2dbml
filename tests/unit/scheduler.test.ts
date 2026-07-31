@@ -28,8 +28,8 @@ function makeTarget(overrides: Partial<SyncTarget> = {}): SyncTarget {
 describe('getNextRun', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    // Wednesday 2026-06-10 12:00:00 local time
-    vi.setSystemTime(new Date(2026, 5, 10, 12, 0, 0));
+    // Wednesday 2026-06-10 12:00:00 UTC
+    vi.setSystemTime(new Date('2026-06-10T12:00:00Z'));
   });
 
   afterEach(() => {
@@ -37,12 +37,12 @@ describe('getNextRun', () => {
   });
 
   it('finds the next matching minute', () => {
-    expect(getNextRun('30 * * * *')).toEqual(new Date(2026, 5, 10, 12, 30, 0));
+    expect(getNextRun('30 * * * *')).toEqual(new Date('2026-06-10T12:30:00Z'));
   });
 
   it('respects day-of-week', () => {
     // Next Friday (from Wednesday noon) at 00:00
-    expect(getNextRun('0 0 * * 5')).toEqual(new Date(2026, 5, 12, 0, 0, 0));
+    expect(getNextRun('0 0 * * 5')).toEqual(new Date('2026-06-12T00:00:00Z'));
   });
 
   it('accepts 7 as Sunday', () => {
@@ -51,14 +51,14 @@ describe('getNextRun', () => {
 
   it('supports day-of-month and month fields', () => {
     // 1st of the next month at midnight
-    expect(getNextRun('0 0 1 * *')).toEqual(new Date(2026, 6, 1, 0, 0, 0));
+    expect(getNextRun('0 0 1 * *')).toEqual(new Date('2026-07-01T00:00:00Z'));
     // Only fires in June
-    expect(getNextRun('0 9 * 6 *')).toEqual(new Date(2026, 5, 11, 9, 0, 0));
+    expect(getNextRun('0 9 * 6 *')).toEqual(new Date('2026-06-11T09:00:00Z'));
   });
 
   it('supports day names and L for last day of month', () => {
     expect(getNextRun('0 0 * * MON-FRI')).toEqual(getNextRun('0 0 * * 1-5'));
-    expect(getNextRun('0 0 L * *')).toEqual(new Date(2026, 5, 30, 0, 0, 0));
+    expect(getNextRun('0 0 L * *')).toEqual(new Date('2026-06-30T00:00:00Z'));
   });
 
   it('evaluates the schedule in the given timezone', () => {
@@ -80,7 +80,7 @@ describe('getNextRun', () => {
 describe('SyncScheduler', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 5, 10, 12, 0, 0));
+    vi.setSystemTime(new Date('2026-06-10T12:00:00Z'));
     vi.mocked(runSync).mockClear();
     vi.mocked(runSync).mockResolvedValue({ committed: true });
   });

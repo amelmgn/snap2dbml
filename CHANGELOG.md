@@ -1,5 +1,9 @@
 ## 2.0.0 [2026-07-30]
 
+Expanded the existing per-target `timezone` setting to control timestamps in generated DBML/Markdown filenames, matching GitHub commit messages, and Telegram's `{{time}}` placeholder as well as cron evaluation. The single setting accepts a validated IANA timezone and defaults to `UTC` for deterministic schedules and output.
+
+Updated files: `src/sync-config.ts`, `src/syncer.ts`, `src/scheduler.ts`, `README.md`, `docs/tech-spec.md`, `tests/unit/sync-config.test.ts`, `tests/unit/syncer.test.ts`, `tests/unit/scheduler.test.ts`.
+
 Added configurable Telegram message templates for sync runs that create a commit, complete without changes, or fail. Templates support `{{name}}`, `{{time}}`, and `{{error}}` placeholders; every field is optional and retains the existing English notification text by default.
 
 Updated files: `src/sync-config.ts`, `src/syncer.ts`, `src/sync.ts`, `src/telegram.ts`, `sync.example.json`, `README.md`, `docs/tech-spec.md`, `tests/unit/sync-config.test.ts`, `tests/unit/syncer.test.ts`, `tests/unit/telegram.test.ts`.
