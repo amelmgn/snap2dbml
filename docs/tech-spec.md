@@ -448,13 +448,14 @@ interface SyncTarget {
   telegram?: {
     botToken: string;
     chatId: string;
+    notifyOn?: 'success' | 'failure' | 'always'; // Default: 'success'
   };
   generateMarkdown?: boolean;      // Default: false
   convertOptions?: ConvertOptions;
 }
 ```
 
-`loadSyncConfig(path)` loads the JSON file, substitutes `${ENV_VAR}` placeholders from `process.env`, and validates all required fields plus name uniqueness.
+`loadSyncConfig(path)` loads the JSON file, substitutes `${ENV_VAR}` placeholders from `process.env`, and validates all required fields plus name uniqueness. Telegram configuration is optional; when present, its credentials and notification mode are validated at load time.
 
 #### GitHub Client (`src/github-client.ts`)
 
@@ -478,7 +479,10 @@ This produces exactly **one commit** regardless of how many files are added, upd
 3. List existing `(schema|description)_<timestamp>.(dbml|md)` files in `schemaDir` (matches both current `YYYYMMDD_HHMMSS` and legacy `YYMMDD_HHMMSS` formats; new files are named with the UTC timestamp, matching the commit message)
 4. Build change list: new `snapshot.json` + new schema files + deletions of old schema files (paths about to be written are excluded from deletions, so a rerun within the same second cannot produce duplicate tree paths)
 5. Call `createSingleCommit` — one commit, one push
-6. Send Telegram notification (non-fatal: HTTP errors are logged, not thrown)
+6. On success, send Telegram notification when `notifyOn` is `success` or `always`. A successful no-change run (`committed: false`) is still a success and is notified.
+7. On failure, send Telegram notification when `notifyOn` is `failure` or `always`, then rethrow the original sync error.
+
+Telegram delivery is non-fatal: transport and non-2xx errors are logged without changing the sync outcome. Failure messages contain a bounded error reason and do not include credentials or snapshot payloads. The internal `src/telegram.ts` module owns delivery and notification-policy matching.
 
 #### Scheduler (`src/scheduler.ts`)
 

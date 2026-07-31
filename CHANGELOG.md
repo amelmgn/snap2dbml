@@ -1,5 +1,9 @@
 ## 2.0.0 [2026-07-30]
 
+Added configurable Telegram notification outcomes for automated sync targets. `telegram.notifyOn` accepts `success`, `failure`, or `always` and defaults to `success` for existing configurations. Success covers every completed sync, including runs where GitHub needs no new commit; failure notifications preserve the original sync error and Telegram delivery remains non-fatal. Telegram configuration is now validated when `sync.json` is loaded.
+
+Updated files: `src/sync-config.ts`, `src/syncer.ts`, `src/sync.ts`, `src/telegram.ts`, `sync.example.json`, `README.md`, `docs/tech-spec.md`, `tests/unit/sync-config.test.ts`, `tests/unit/syncer.test.ts`, `tests/unit/telegram.test.ts`.
+
 Consolidated Docker deployment into `docker/docker-compose.yml` and one shared `docker/.env`. Production and profile-gated stage services retain separate image tags and containers but intentionally share port `3000`, credentials, and the optional sync mount, making them mutually exclusive replacement instances. The documented switch flow pulls stage before stopping production, tests stage against the live configuration, then pulls the promoted production image and switches back; the stopped production container remains available for immediate rollback.
 
 Updated files: `docker/docker-compose.yml`, `docker/.env.example`, removed `docker/dev`, `docker/stage`, and `docker/prod` Compose assets, `.github/workflows/docker-publish.yml`, `.gitignore`, `README.md`, `docs/tech-spec.md`, `AGENTS.md`, `CLAUDE.md`.
