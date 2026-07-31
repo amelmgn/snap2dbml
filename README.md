@@ -94,7 +94,8 @@ cp sync.example.json sync.json
       },
       "telegram": {
         "botToken": "${TELEGRAM_BOT_TOKEN}",
-        "chatId": "YOUR_CHAT_ID"
+        "chatId": "YOUR_CHAT_ID",
+        "notifyOn": "always"
       },
       "generateMarkdown": true
     }
@@ -115,6 +116,16 @@ The legacy `owner` and `repo` fields remain supported for existing configuration
 
 Add more objects to `syncs` to manage multiple repositories. Each target has an independent schedule, credentials, destination, and conversion settings.
 
+`telegram.notifyOn` controls which completed sync outcomes produce a Telegram message:
+
+| Value | Behavior |
+|-------|----------|
+| `success` | Notify after every successfully completed sync, including runs where no GitHub commit was needed. This is the default. |
+| `failure` | Notify only when the sync fails. |
+| `always` | Notify after both successful and failed syncs. |
+
+Telegram delivery is non-fatal: a delivery error is logged without changing the sync result. Failure messages contain a concise error reason and never include configured credentials or snapshot payloads.
+
 Run configured targets manually:
 
 ```bash
@@ -132,7 +143,7 @@ Each successful sync commit contains:
 - a matching `description_YYYYMMDD_HHMMSS.md` when Markdown generation is enabled;
 - deletion of previous `.dbml` and `.md` artifacts from the managed `schemaDir`.
 
-The directory listing and commit use the same branch revision. If another scheduler updates the branch concurrently, sync reads the new HEAD and retries. Identical Git trees are not committed, and Telegram is notified only after a real branch update.
+The directory listing and commit use the same branch revision. If another scheduler updates the branch concurrently, sync reads the new HEAD and retries. Identical Git trees are not committed. With the default `telegram.notifyOn: "success"`, both committed and no-change runs produce a success notification.
 
 Scheduling uses [croner](https://github.com/hexagon/croner). Cron expressions support values, ranges (`1-5`), wildcards (`*`), lists (`1,3,5`), steps (`*/15`, `8-17/2`), day and month names (`MON-FRI`, `JAN`), and the `L` (last), `W` (nearest weekday), and `#` (nth weekday) modifiers. All five fields are evaluated; `7` is accepted as Sunday. An optional `timezone` per target pins the schedule to an IANA timezone (e.g. `"timezone": "Europe/Podgorica"`); without it, schedules run in server-local time. Invalid schedules and timezones are rejected when the configuration is loaded.
 
