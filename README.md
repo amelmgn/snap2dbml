@@ -312,8 +312,8 @@ GitHub Actions publishes images for pushes to the `stage` and `prod` branches. E
 ```bash
 cp .env.example .env.stage
 # Set a separate API_KEY in .env.stage
-docker compose -f docker-compose.stage.yml -p snap2dbml-stage pull
-docker compose -f docker-compose.stage.yml -p snap2dbml-stage up -d
+docker compose --env-file .env.stage -f docker-compose.stage.yml -p snap2dbml-stage pull
+docker compose --env-file .env.stage -f docker-compose.stage.yml -p snap2dbml-stage up -d
 curl http://localhost:3001/health
 ```
 
