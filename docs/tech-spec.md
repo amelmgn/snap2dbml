@@ -599,7 +599,8 @@ POST /convert              → 200 {dbml, md, warnings, stats, metadata}
 Run with Docker:
 ```bash
 cp docker/dev/.env.example docker/dev/.env
-docker compose --env-file docker/dev/.env -f docker/dev/docker-compose.yml up -d --build
+cd docker/dev
+docker compose up -d --build
 ```
 
 Run without Docker:
@@ -1052,13 +1053,15 @@ Images are published by CI on every push to `stage` and `prod` branches, tagged 
 # Production (pulls ghcr.io image pinned to :prod, or IMAGE_TAG from docker/prod/.env)
 git clone <repo> && cd snap2dbml
 cp docker/prod/.env.example docker/prod/.env  # set API_KEY, GHCR_OWNER
-docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml pull
-docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml up -d
+cd docker/prod
+docker compose pull
+docker compose up -d
 
 # Staging — second container on the same host (:stage image, port 3001,
 # separate compose project so it can never recreate the prod container)
 cp docker/stage/.env.example docker/stage/.env  # separate API_KEY; sandbox SYNC_CONFIG if testing sync
-docker compose --env-file docker/stage/.env -f docker/stage/docker-compose.yml -p snap2dbml-stage up -d
+cd docker/stage
+docker compose -p snap2dbml-stage up -d
 
 # nginx reverse proxy (HTTP → localhost:PORT)
 # Certbot for HTTPS

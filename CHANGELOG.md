@@ -4,6 +4,10 @@ Organized Docker deployment assets into `docker/dev`, `docker/stage`, and `docke
 
 Updated files: `docker/dev/docker-compose.yml`, `docker/dev/.env.example`, `docker/stage/docker-compose.yml`, `docker/stage/.env.example`, `docker/prod/docker-compose.yml`, `docker/prod/.env.example`, removed root Compose files and `.env.example`, `.gitignore`, `README.md`, `docs/tech-spec.md`.
 
+Docker instructions now assume commands run from the selected `docker/<environment>` folder, so standard `docker compose` commands use the local Compose file and `.env` without explicit paths.
+
+Updated files: `README.md`, `docs/tech-spec.md`, `AGENTS.md`, `CLAUDE.md`.
+
 Added structured logging and a status endpoint to the service. All server and sync output is now emitted as JSON lines on stdout (`{"time","level","scope","msg",...}`) through a new zero-dependency logger (`src/logger.ts`) with `debug`/`info`/`warn`/`error` levels controlled by `LOG_LEVEL` (default `info`). HTTP requests are logged with method, path (query string stripped), status, and duration; `/health` logs at `debug` so container healthchecks stay out of the default stream. Errors carry serialized `message`/`stack` fields. The one-shot `snap2dbml sync` CLI command logs human-readable text to stderr instead of JSON.
 
 Capped Docker log storage for the production and staging containers at 3 rotated files of 10 MB each (`logging` options in `docker-compose.yml` and `docker-compose.stage.yml`), so the json-file driver cannot grow unbounded on long-running hosts.
