@@ -598,9 +598,9 @@ POST /convert              → 200 {dbml, md, warnings, stats, metadata}
 
 Run with Docker:
 ```bash
-cp docker/dev/.env.example docker/dev/.env
-cd docker/dev
-docker compose up -d --build
+cp docker/.env.example docker/.env
+docker build -t snap2dbml:local .
+docker run --rm --env-file docker/.env -e SYNC_CONFIG= -p 3001:3000 snap2dbml:local
 ```
 
 Run without Docker:
@@ -849,15 +849,8 @@ snap2dbml/
 ├── benchmarks/
 ├── Dockerfile             ← two-stage build (builder + runtime)
 ├── docker/
-│   ├── dev/                ← local build, host port 3001
-│   │   ├── docker-compose.yml
-│   │   └── .env.example
-│   ├── stage/              ← stage image, host port 3001
-│   │   ├── docker-compose.yml
-│   │   └── .env.example
-│   └── prod/               ← production image, host port 3000
-│       ├── docker-compose.yml
-│       └── .env.example
+│   ├── docker-compose.yml  ← mutually exclusive prod and stage services
+│   └── .env.example        ← shared runtime and image-tag configuration
 ├── .dockerignore
 ├── sync.example.json      ← sync config template
 ├── package.json
@@ -1047,31 +1040,37 @@ npm publish
 
 ### HTTP Server — VPS (Docker)
 
-Images are published by CI on every push to `stage` and `prod` branches, tagged with the branch name and an immutable `sha-<short>`. No `latest` tag is published; compose files reference explicit tags.
+Images are published by CI on every push to `stage` and `prod` branches, tagged with the branch name and an immutable `sha-<short>`. No `latest` tag is published. A single Compose project defines separate `prod` and profile-gated `stage` services; both bind host port `3000` and share `.env` plus the optional `sync.json` mount, so only one service may run at a time.
 
 ```bash
-# Production (pulls ghcr.io image pinned to :prod, or IMAGE_TAG from docker/prod/.env)
+# Initial production deployment
 git clone <repo> && cd snap2dbml
-cp docker/prod/.env.example docker/prod/.env  # set API_KEY, GHCR_OWNER
-cd docker/prod
-docker compose pull
-docker compose up -d
+cp docker/.env.example docker/.env  # set API_KEY, GHCR_OWNER, and sync credentials
+cd docker
+docker compose pull prod
+docker compose up -d prod
 
-# Staging — second container on the same host (:stage image, port 3001,
-# separate compose project so it can never recreate the prod container)
-cp docker/stage/.env.example docker/stage/.env  # separate API_KEY; sandbox SYNC_CONFIG if testing sync
-cd docker/stage
-docker compose -p snap2dbml-stage up -d
+# Replace production temporarily with the stage build
+docker compose --profile stage pull stage
+docker compose stop prod
+docker compose --profile stage up -d stage
+
+# After publishing the tested commit under :prod, switch back
+docker compose pull prod
+docker compose --profile stage stop stage
+docker compose up -d prod
 
 # nginx reverse proxy (HTTP → localhost:PORT)
 # Certbot for HTTPS
 ```
 
+Both containers remain in the same Compose project, but the shared host port and scheduler configuration make them mutually exclusive. The `stage` profile prevents an untargeted `docker compose up` from starting both. A manually stopped service remains stopped across Docker daemon restarts because both services use `restart: unless-stopped`.
+
 The Dockerfile uses a two-stage build:
 1. **builder** — installs all deps, runs `npm run build`
 2. **runtime** — `node:22-alpine` + production deps only + compiled `dist/`
 
-Container exposes port 3000 internally; host ports are configured in the environment-specific Compose files under `docker/`.
+The container exposes port `3000` internally, and both Compose services publish it as host port `3000` so nginx configuration does not change during a switch.
 
 A `HEALTHCHECK` directive pings `/health` every 30s; Docker marks the container unhealthy after 3 consecutive failures.
 
@@ -1103,7 +1102,7 @@ npm deprecate snap2dbml@X.Y.Z "Critical bug, use X.Y.W instead"
 npm publish  # New fixed version
 ```
 
-For Docker: set `IMAGE_TAG` in `docker/prod/.env` to the previous immutable `sha-*` tag and run the production Compose `pull` and `up` commands above.
+For Docker, a failed stage test is rolled back by stopping `stage` and starting the existing stopped `prod` container. To roll back an already updated production service, set `PROD_IMAGE_TAG` in `docker/.env` to the previous immutable `sha-*` tag, pull `prod`, and run `docker compose up -d prod`.
 
 ### Versioning Policy
 

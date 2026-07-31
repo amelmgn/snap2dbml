@@ -48,8 +48,8 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/snap2dbml
           # Tags: branch name (stage/prod) + immutable sha-<short> per commit.
-          # The "latest" tag is intentionally never published — compose files
-          # must reference an explicit tag so prod can't pick up stage images.
+          # The "latest" tag is intentionally never published — each Compose
+          # service must reference an explicit tag.
           flavor: |
             latest=false
           tags: |

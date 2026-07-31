@@ -1,0 +1,31 @@
+x-snap2dbml-common: &snap2dbml-common
+  restart: unless-stopped
+  env_file:
+    - .env
+  environment:
+    # Both services replace the same live instance and listen on the same host
+    # port, so stop the active service before starting the other one.
+    PORT: 3000
+  ports:
+    - "3000:3000"
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  # Uncomment when enabling the built-in sync scheduler (SYNC_CONFIG in .env):
+  # volumes:
+  #   - ./sync.json:/app/sync.json:ro
+
+services:
+  prod:
+    <<: *snap2dbml-common
+    image: ghcr.io/${GHCR_OWNER}/snap2dbml:${PROD_IMAGE_TAG:-prod}
+    container_name: snap2dbml-prod
+
+  stage:
+    <<: *snap2dbml-common
+    image: ghcr.io/${GHCR_OWNER}/snap2dbml:${STAGE_IMAGE_TAG:-stage}
+    container_name: snap2dbml-stage
+    profiles:
+      - stage
