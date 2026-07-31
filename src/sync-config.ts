@@ -65,9 +65,13 @@ export function resolveGitHubRepository(
     : { owner: github.owner, repo: github.repo };
 }
 
+export type TelegramNotificationMode = 'success' | 'failure' | 'always';
+
 export interface TelegramSyncConfig {
   botToken: string;
   chatId: string;
+  /** Which completed sync outcomes trigger a notification. Default: "success". */
+  notifyOn?: TelegramNotificationMode;
 }
 
 export interface SyncTarget {
@@ -194,5 +198,22 @@ function validateSyncTargets(syncs: unknown[]): void {
     requireString(github, 'token', `${ctx}.github`);
     requireString(github, 'snapshotPath', `${ctx}.github`);
     requireString(github, 'schemaDir', `${ctx}.github`);
+
+    if (target.telegram !== undefined) {
+      if (!target.telegram || typeof target.telegram !== 'object') {
+        throw new Error(`${ctx}.telegram must be an object`);
+      }
+      const telegram = target.telegram as Record<string, unknown>;
+      requireString(telegram, 'botToken', `${ctx}.telegram`);
+      requireString(telegram, 'chatId', `${ctx}.telegram`);
+      if (
+        telegram.notifyOn !== undefined
+        && !['success', 'failure', 'always'].includes(telegram.notifyOn as string)
+      ) {
+        throw new Error(
+          `${ctx}.telegram.notifyOn must be one of "success", "failure", or "always"`,
+        );
+      }
+    }
   }
 }

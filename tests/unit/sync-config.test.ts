@@ -93,4 +93,35 @@ describe('schedule validation at config load', () => {
     const path = writeConfig({ ...validTarget, timezone: 42 });
     expect(() => loadSyncConfig(path)).toThrow(/syncs\[0\]\.timezone must be a string/);
   });
+
+  it.each(['success', 'failure', 'always'] as const)(
+    'accepts the Telegram notification mode "%s"',
+    (notifyOn) => {
+      const telegram = { botToken: 'bot-token', chatId: 'chat-id', notifyOn };
+      const path = writeConfig({ ...validTarget, telegram });
+      expect(loadSyncConfig(path).syncs[0].telegram).toEqual(telegram);
+    },
+  );
+
+  it('accepts Telegram configuration without notifyOn for backward compatibility', () => {
+    const telegram = { botToken: 'bot-token', chatId: 'chat-id' };
+    const path = writeConfig({ ...validTarget, telegram });
+    expect(loadSyncConfig(path).syncs[0].telegram).toEqual(telegram);
+  });
+
+  it('rejects incomplete Telegram configuration and unknown notification modes', () => {
+    const missingToken = writeConfig({
+      ...validTarget,
+      telegram: { chatId: 'chat-id' },
+    });
+    expect(() => loadSyncConfig(missingToken)).toThrow(/telegram\.botToken is required/);
+
+    const invalidMode = writeConfig({
+      ...validTarget,
+      telegram: { botToken: 'bot-token', chatId: 'chat-id', notifyOn: 'sometimes' },
+    });
+    expect(() => loadSyncConfig(invalidMode)).toThrow(
+      /telegram\.notifyOn must be one of "success", "failure", or "always"/,
+    );
+  });
 });

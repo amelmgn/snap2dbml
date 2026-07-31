@@ -16,7 +16,8 @@
       },
       "telegram": {
         "botToken": "${TELEGRAM_BOT_TOKEN}",
-        "chatId": "YOUR_CHAT_ID"
+        "chatId": "YOUR_CHAT_ID",
+        "notifyOn": "always"
       },
       "generateMarkdown": true
     },
