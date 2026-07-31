@@ -598,7 +598,8 @@ POST /convert              → 200 {dbml, md, warnings, stats, metadata}
 
 Run with Docker:
 ```bash
-docker compose up -d --build   # uses PORT and API_KEY from .env
+cp docker/dev/.env.example docker/dev/.env
+docker compose --env-file docker/dev/.env -f docker/dev/docker-compose.yml up -d --build
 ```
 
 Run without Docker:
@@ -846,9 +847,17 @@ snap2dbml/
 │   └── fuzz/
 ├── benchmarks/
 ├── Dockerfile             ← two-stage build (builder + runtime)
-├── docker-compose.yml     ← maps host port → container 3000
+├── docker/
+│   ├── dev/                ← local build, host port 3001
+│   │   ├── docker-compose.yml
+│   │   └── .env.example
+│   ├── stage/              ← stage image, host port 3001
+│   │   ├── docker-compose.yml
+│   │   └── .env.example
+│   └── prod/               ← production image, host port 3000
+│       ├── docker-compose.yml
+│       └── .env.example
 ├── .dockerignore
-├── .env.example           ← PORT, API_KEY, SYNC_CONFIG
 ├── sync.example.json      ← sync config template
 ├── package.json
 ├── tsconfig.json
@@ -1040,15 +1049,16 @@ npm publish
 Images are published by CI on every push to `stage` and `prod` branches, tagged with the branch name and an immutable `sha-<short>`. No `latest` tag is published; compose files reference explicit tags.
 
 ```bash
-# Production (pulls ghcr.io image pinned to :prod, or IMAGE_TAG from .env)
+# Production (pulls ghcr.io image pinned to :prod, or IMAGE_TAG from docker/prod/.env)
 git clone <repo> && cd snap2dbml
-cp .env.example .env          # set API_KEY, GHCR_OWNER
-docker compose pull && docker compose up -d
+cp docker/prod/.env.example docker/prod/.env  # set API_KEY, GHCR_OWNER
+docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml pull
+docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml up -d
 
 # Staging — second container on the same host (:stage image, port 3001,
 # separate compose project so it can never recreate the prod container)
-cp .env.example .env.stage    # separate API_KEY; sandbox SYNC_CONFIG if testing sync
-docker compose -f docker-compose.stage.yml -p snap2dbml-stage up -d
+cp docker/stage/.env.example docker/stage/.env  # separate API_KEY; sandbox SYNC_CONFIG if testing sync
+docker compose --env-file docker/stage/.env -f docker/stage/docker-compose.yml -p snap2dbml-stage up -d
 
 # nginx reverse proxy (HTTP → localhost:PORT)
 # Certbot for HTTPS
@@ -1058,7 +1068,7 @@ The Dockerfile uses a two-stage build:
 1. **builder** — installs all deps, runs `npm run build`
 2. **runtime** — `node:22-alpine` + production deps only + compiled `dist/`
 
-Container exposes port 3000 internally; host port is configured in `docker-compose.yml`.
+Container exposes port 3000 internally; host ports are configured in the environment-specific Compose files under `docker/`.
 
 A `HEALTHCHECK` directive pings `/health` every 30s; Docker marks the container unhealthy after 3 consecutive failures.
 
@@ -1090,7 +1100,7 @@ npm deprecate snap2dbml@X.Y.Z "Critical bug, use X.Y.W instead"
 npm publish  # New fixed version
 ```
 
-For Docker: set `IMAGE_TAG` in `.env` to the previous immutable `sha-*` tag and run `docker compose pull && docker compose up -d`.
+For Docker: set `IMAGE_TAG` in `docker/prod/.env` to the previous immutable `sha-*` tag and run the production Compose `pull` and `up` commands above.
 
 ### Versioning Policy
 
