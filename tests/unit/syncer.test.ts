@@ -106,4 +106,101 @@ describe('runSync', () => {
       }),
     );
   });
+
+  it('notifies on a successful run even when no commit is created', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-30T00:00:02Z'));
+
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, init });
+
+      if (url === target.directus.snapshotUrl) return jsonResponse(snapshot);
+      if (url.endsWith('/git/ref/heads/main')) {
+        return jsonResponse({ object: { sha: 'head' } });
+      }
+      if (url.includes('/contents/Directus/schema?ref=head')) return jsonResponse([]);
+      if (url.endsWith('/git/commits/head')) return jsonResponse({ tree: { sha: 'base-tree' } });
+      if (url.endsWith('/git/blobs')) return jsonResponse({ sha: 'blob' });
+      if (url.endsWith('/git/trees')) return jsonResponse({ sha: 'base-tree' });
+      if (url.startsWith('https://api.telegram.org/')) return jsonResponse({ ok: true });
+      throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${url}`);
+    }));
+
+    const syncTarget: SyncTarget = {
+      ...target,
+      telegram: { botToken: 'bot-token', chatId: 'chat-id', notifyOn: 'success' },
+    };
+    const { committed } = await runSync(syncTarget, captureLogger().logger);
+
+    expect(committed).toBe(false);
+    const telegramRequest = requests.find(request => request.url.startsWith(
+      'https://api.telegram.org/',
+    ));
+    expect(telegramRequest).toBeDefined();
+    expect(JSON.parse(String(telegramRequest?.init?.body))).toMatchObject({
+      chat_id: 'chat-id',
+      text: expect.stringContaining('Sync completed successfully; no schema changes detected'),
+    });
+  });
+
+  it.each(['failure', 'always'] as const)(
+    'notifies on failure in "%s" mode and preserves the original error',
+    async (notifyOn) => {
+      const requests: Array<{ url: string; init?: RequestInit }> = [];
+      vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        requests.push({ url, init });
+        if (url === target.directus.snapshotUrl) {
+          return jsonResponse({ message: 'Unauthorized' }, 401);
+        }
+        if (url.startsWith('https://api.telegram.org/')) {
+          return jsonResponse({ description: 'delivery failed' }, 500);
+        }
+        throw new Error(`Unexpected request: ${init?.method ?? 'GET'} ${url}`);
+      }));
+
+      const syncTarget: SyncTarget = {
+        ...target,
+        telegram: { botToken: 'bot-token', chatId: 'chat-id', notifyOn },
+      };
+      const { logger, records } = captureLogger();
+
+      await expect(runSync(syncTarget, logger)).rejects.toThrow(
+        'Directus snapshot fetch failed: HTTP 401',
+      );
+      const telegramRequest = requests.find(request => request.url.startsWith(
+        'https://api.telegram.org/',
+      ));
+      expect(JSON.parse(String(telegramRequest?.init?.body))).toMatchObject({
+        chat_id: 'chat-id',
+        text: expect.stringContaining('Directus schema sync failed'),
+      });
+      expect(records).toContainEqual(expect.objectContaining({
+        level: 'warn',
+        scope: 'sync:test',
+        msg: 'Telegram notification failed',
+        status: 500,
+      }));
+    },
+  );
+
+  it('does not notify on failure in the default success mode', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === target.directus.snapshotUrl) return jsonResponse({}, 500);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const syncTarget: SyncTarget = {
+      ...target,
+      telegram: { botToken: 'bot-token', chatId: 'chat-id' },
+    };
+    await expect(runSync(syncTarget, captureLogger().logger)).rejects.toThrow(
+      'Directus snapshot fetch failed: HTTP 500',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

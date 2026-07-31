@@ -10,6 +10,10 @@ import { createLogger } from './logger.js';
 import type { Logger } from './logger.js';
 import { resolveGitHubRepository } from './sync-config.js';
 import type { SyncTarget } from './sync-config.js';
+import {
+  sendTelegramNotification,
+  shouldSendTelegramNotification,
+} from './telegram.js';
 import type { DirectusSnapshot } from './types.js';
 
 const FETCH_TIMEOUT_MS = 30_000;
@@ -42,33 +46,28 @@ async function fetchDirectusSnapshot(url: string, bearerToken: string): Promise<
   return response.json() as Promise<DirectusSnapshot>;
 }
 
-async function sendTelegram(
-  botToken: string,
-  chatId: string,
-  text: string,
-  logger: Logger,
-): Promise<void> {
-  try {
-    const response = await fetchWithTimeout(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, disable_notification: true }),
-    });
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      logger.warn('Telegram notification failed', { status: response.status, body });
-    }
-  } catch (err) {
-    logger.warn('Telegram notification failed', { err });
-  }
+function formatNotificationTime(date: Date): string {
+  return date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 }
 
-export async function runSync(
+function formatFailureReason(err: unknown, target: SyncTarget): string {
+  let message = err instanceof Error ? err.message : String(err);
+  const secrets = [
+    target.directus.bearerToken,
+    target.github.token,
+    target.telegram?.botToken,
+  ];
+  for (const secret of secrets) {
+    if (secret) message = message.replaceAll(secret, '[REDACTED]');
+  }
+  return message.length > 500 ? `${message.slice(0, 497)}...` : message;
+}
+
+async function performSync(
   target: SyncTarget,
-  baseLogger: Logger = createLogger(),
+  logger: Logger,
 ): Promise<{ committed: boolean }> {
-  const { name, directus, github, telegram, generateMarkdown = false, convertOptions } = target;
-  const logger = baseLogger.child(`sync:${name}`);
+  const { directus, github, generateMarkdown = false, convertOptions } = target;
   const { owner, repo: repoName } = resolveGitHubRepository(github);
   const repo: GitHubRepo = {
     owner,
@@ -145,14 +144,37 @@ export async function runSync(
 
   logger.info(committed ? 'Done' : 'No changes; commit skipped', { committed });
 
-  if (telegram && committed) {
-    await sendTelegram(
-      telegram.botToken,
-      telegram.chatId,
-      `[${name}] Directus schema updated at ${nowIso}`,
-      logger,
-    );
-  }
-
   return { committed };
+}
+
+export async function runSync(
+  target: SyncTarget,
+  baseLogger: Logger = createLogger(),
+): Promise<{ committed: boolean }> {
+  const { name, telegram } = target;
+  const logger = baseLogger.child(`sync:${name}`);
+
+  try {
+    const result = await performSync(target, logger);
+    if (telegram && shouldSendTelegramNotification(telegram.notifyOn, 'success')) {
+      const outcome = result.committed
+        ? 'Directus schema updated'
+        : 'Sync completed successfully; no schema changes detected';
+      await sendTelegramNotification(
+        telegram,
+        `✅ [${name}] ${outcome} at ${formatNotificationTime(new Date())}`,
+        logger,
+      );
+    }
+    return result;
+  } catch (err) {
+    if (telegram && shouldSendTelegramNotification(telegram.notifyOn, 'failure')) {
+      await sendTelegramNotification(
+        telegram,
+        `❌ [${name}] Directus schema sync failed at ${formatNotificationTime(new Date())}\n${formatFailureReason(err, target)}`,
+        logger,
+      );
+    }
+    throw err;
+  }
 }
