@@ -285,7 +285,8 @@ Docker configuration is organized by environment under `docker/`. Each environme
 ```bash
 cp docker/dev/.env.example docker/dev/.env
 # Set API_KEY in docker/dev/.env
-docker compose --env-file docker/dev/.env -f docker/dev/docker-compose.yml up -d --build
+cd docker/dev
+docker compose up -d --build
 curl http://localhost:3001/health
 ```
 
@@ -298,8 +299,9 @@ This configuration validates the local Docker build. It does not mount source fi
 ```bash
 cp docker/prod/.env.example docker/prod/.env
 # Set API_KEY and GHCR_OWNER in docker/prod/.env
-docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml pull
-docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml up -d
+cd docker/prod
+docker compose pull
+docker compose up -d
 curl http://localhost:3000/health
 ```
 
@@ -312,8 +314,9 @@ GitHub Actions publishes images for pushes to the `stage` and `prod` branches. E
 ```bash
 cp docker/stage/.env.example docker/stage/.env
 # Set a separate API_KEY in docker/stage/.env
-docker compose --env-file docker/stage/.env -f docker/stage/docker-compose.yml -p snap2dbml-stage pull
-docker compose --env-file docker/stage/.env -f docker/stage/docker-compose.yml -p snap2dbml-stage up -d
+cd docker/stage
+docker compose -p snap2dbml-stage pull
+docker compose -p snap2dbml-stage up -d
 curl http://localhost:3001/health
 ```
 
