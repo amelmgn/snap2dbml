@@ -263,7 +263,7 @@ Response:
 
 ### Logging
 
-The service writes structured JSON logs to stdout, one object per line: `{"time","level","scope","msg",...}`. Requests are logged with method, path (query string stripped), status, and duration; `/health` requests log at `debug` level so container healthchecks stay out of the default stream. View logs with `docker logs` (or `docker compose logs`); the production and staging Compose files cap Docker's log storage at 3 rotated files of 10 MB each. The one-shot `snap2dbml sync` CLI command logs human-readable text to stderr instead.
+The service writes structured JSON logs to stdout, one object per line: `{"time","level","scope","msg",...}`. Requests are logged with method, path (query string stripped), status, and duration; `/health` requests log at `debug` level so container healthchecks stay out of the default stream. View logs with `docker logs` (or `docker compose logs`); the Compose services cap Docker's log storage at 3 rotated files of 10 MB each. The one-shot `snap2dbml sync` CLI command logs human-readable text to stderr instead.
 
 ### HTTP environment variables
 
@@ -276,63 +276,75 @@ The service writes structured JSON logs to stdout, one object per line: `{"time"
 
 ## Docker
 
-Docker configuration is organized by environment under `docker/`. Each environment folder contains its own `docker-compose.yml` and sanitized `.env.example` file.
+Docker uses one `docker/docker-compose.yml` and one shared `docker/.env`. The Compose file defines `prod` and `stage` services with different image tags but the same runtime configuration and host port. They are replacement instances: only one may run at a time.
 
 ### Local Docker build
 
-`docker/dev/docker-compose.yml` builds an image from the current checkout and exposes it on port `3001`:
+Build the current checkout and run it on port `3001` without starting the configured scheduler:
 
 ```bash
-cp docker/dev/.env.example docker/dev/.env
-# Set API_KEY in docker/dev/.env
-cd docker/dev
-docker compose up -d --build
+cp docker/.env.example docker/.env
+# Set API_KEY in docker/.env
+docker build -t snap2dbml:local .
+docker run --rm --env-file docker/.env -e SYNC_CONFIG= -p 3001:3000 snap2dbml:local
 curl http://localhost:3001/health
 ```
 
-This configuration validates the local Docker build. It does not mount source files or provide hot reload.
+This validates the local Docker build. It does not mount source files or provide hot reload.
 
 ### Production deployment
 
-`docker/prod/docker-compose.yml` pulls the published `:prod` image and exposes it on port `3000`:
+Create the shared environment file, then start the production service on port `3000`:
 
 ```bash
-cp docker/prod/.env.example docker/prod/.env
-# Set API_KEY and GHCR_OWNER in docker/prod/.env
-cd docker/prod
-docker compose pull
-docker compose up -d
+cp docker/.env.example docker/.env
+# Set API_KEY, GHCR_OWNER, and any sync credentials in docker/.env
+cd docker
+docker compose pull prod
+docker compose up -d prod
 curl http://localhost:3000/health
 ```
 
-GitHub Actions publishes images for pushes to the `stage` and `prod` branches. Each build receives the branch tag and an immutable `sha-<short>` tag. No `latest` tag is published. Set `IMAGE_TAG=sha-...` in `docker/prod/.env` to pin production to an immutable build.
+GitHub Actions publishes images for pushes to the `stage` and `prod` branches. Each build receives the branch tag and an immutable `sha-<short>` tag. No `latest` tag is published. Set `PROD_IMAGE_TAG=sha-...` or `STAGE_IMAGE_TAG=sha-...` in `docker/.env` to pin a service to an immutable build.
 
-### Staging deployment
+### Testing stage in place of production
 
-`docker/stage/docker-compose.yml` pulls the `:stage` image and runs alongside production on port `3001`:
+The two services use the same host port, API key, sync configuration, and credentials. Stop production before starting stage so the port and scheduler have a single owner:
 
 ```bash
-cp docker/stage/.env.example docker/stage/.env
-# Set a separate API_KEY in docker/stage/.env
-cd docker/stage
-docker compose -p snap2dbml-stage pull
-docker compose -p snap2dbml-stage up -d
-curl http://localhost:3001/health
+cd docker
+docker compose --profile stage pull stage
+docker compose stop prod
+docker compose --profile stage up -d stage
+curl http://localhost:3000/health
 ```
 
-The separate Compose project name prevents staging commands from modifying the production container. A staging scheduler must use a sandbox repository or a separate branch and directory; it must never manage production paths.
+After the tested commit is published under the `prod` tag, pull it before stopping stage, then switch back:
 
-Local Docker and staging both use host port `3001`, so they cannot run simultaneously unless one port mapping is changed.
+```bash
+docker compose pull prod
+docker compose --profile stage stop stage
+docker compose up -d prod
+```
+
+If stage fails, restore the stopped production container without recreating it:
+
+```bash
+docker compose --profile stage stop stage
+docker compose start prod
+```
+
+`docker compose --profile stage ps -a` shows both containers and which one is active. The `stage` profile prevents an untargeted `docker compose up` from attempting to bind both services to port `3000`.
 
 ### Docker environment variables
 
 | Variable | Description |
 |----------|-------------|
 | `GHCR_OWNER` | GitHub account or organization that owns the container image. |
-| `IMAGE_TAG` | Production image tag. Default: `prod`; may be an immutable `sha-*` tag. |
-| `STAGE_IMAGE_TAG` | Staging image tag. Default: `stage`. |
-| `PORT` | Internal HTTP listening port. The Compose files keep it at `3000`. |
-| `API_KEY` | HTTP API key. Use different values for production and staging. |
+| `PROD_IMAGE_TAG` | Production image tag. Default: `prod`; may be an immutable `sha-*` tag. |
+| `STAGE_IMAGE_TAG` | Stage image tag. Default: `stage`; may be an immutable `sha-*` tag. |
+| `PORT` | Internal HTTP listening port. Compose keeps it at `3000`. |
+| `API_KEY` | Shared HTTP API key used by the active service. |
 | `SYNC_CONFIG` | Path to the sync configuration inside the container. |
 
 ### Scheduled sync in Docker
@@ -345,14 +357,14 @@ DIRECTUS_TOKEN=your-directus-token
 GITHUB_TOKEN=your-github-token
 ```
 
-Mount the matching configuration into the container by enabling the volume in the relevant Compose file. Place it beside that Compose file (for example, `docker/prod/sync.json`):
+Place the shared configuration at `docker/sync.json` and enable the volume in `docker/docker-compose.yml`:
 
 ```yaml
 volumes:
   - ./sync.json:/app/sync.json:ro
 ```
 
-For staging, use a separate `docker/stage/sync.json` that targets a sandbox repository or branch.
+Both services inherit this mount. Because they are never run simultaneously, production and stage exercise the same scheduler configuration without duplicate sync runs.
 
 ## Library API
 
@@ -474,7 +486,7 @@ Markdown generation produces collection field tables:
 - Directus system collection filtering
 - UTF-8 collection and field names
 - Stateless authenticated HTTP API
-- Docker images for staging and production
+- In-place Docker switching between stage and production images
 
 ## Development
 

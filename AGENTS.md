@@ -67,21 +67,22 @@ npm run build
 API_KEY=your-secret npm start
 ```
 
-It listens on port `3000`, reads `API_KEY`, `PORT`, `LOG_LEVEL`, and the sync variables from the environment, and starts the scheduler only when `SYNC_CONFIG` is set. For local Docker runs, copy the relevant `docker/<environment>/.env.example` file to `.env` in the same folder.
+It listens on port `3000`, reads `API_KEY`, `PORT`, `LOG_LEVEL`, and the sync variables from the environment, and starts the scheduler only when `SYNC_CONFIG` is set. Docker deployment uses one `docker/docker-compose.yml` and one shared `docker/.env` copied from `.env.example`.
 
-Three environment-specific Compose files must stay distinct:
+The Compose project defines mutually exclusive `prod` and `stage` services:
 
-- `docker/dev/docker-compose.yml` builds from the checkout and publishes host port `3001`. It has no source mount or hot reload.
-- `docker/prod/docker-compose.yml` pulls `ghcr.io/${GHCR_OWNER}/snap2dbml:${IMAGE_TAG:-prod}` on host port `3000`.
-- `docker/stage/docker-compose.yml` pulls the `:stage` tag on host port `3001`, reads `docker/stage/.env`, and requires the separate project name `-p snap2dbml-stage` so staging commands cannot touch the production container.
+- both publish host port `3000`, use the same runtime environment, and optionally mount the same `docker/sync.json`;
+- `prod` pulls `ghcr.io/${GHCR_OWNER}/snap2dbml:${PROD_IMAGE_TAG:-prod}`;
+- profile-gated `stage` pulls `ghcr.io/${GHCR_OWNER}/snap2dbml:${STAGE_IMAGE_TAG:-stage}`;
+- stop the active service before starting the other so only one scheduler and port owner exists.
 
 ```bash
-cd docker/dev && docker compose up -d --build
-cd docker/prod && docker compose up -d
-cd docker/stage && docker compose -p snap2dbml-stage up -d
+cd docker && docker compose up -d prod
+cd docker && docker compose stop prod
+cd docker && docker compose --profile stage up -d stage
 ```
 
-Local Docker and staging share host port `3001` and cannot run at the same time. The container always listens on `3000` internally; change the host side of the port mapping instead. `.github/workflows/docker-publish.yml` publishes `stage` and `prod` branch tags plus immutable `sha-<short>` tags, and no `latest` tag. Keep the port mappings, log rotation limits, environment variables, and volume comments in the Compose files consistent with `README.md` and with server behavior.
+For local image validation, use `docker build` and `docker run` on host port `3001`; there is no separate development Compose service. `.github/workflows/docker-publish.yml` publishes `stage` and `prod` branch tags plus immutable `sha-<short>` tags, and no `latest` tag. Keep the shared port, profile, log rotation limits, environment variables, and volume comments consistent with `README.md` and server behavior.
 
 ## Implementation conventions
 
@@ -117,7 +118,7 @@ Local Docker and staging share host port `3001` and cannot run at the same time.
 
 ## Configuration and security
 
-- `settings.json`, `sync.json`, `.env`, and their stage variants are local files and are ignored by Git. Commit only sanitized examples such as `settings.example.json`, `sync.example.json`, and `.env.example`.
+- `settings.json`, `sync.json`, and `.env` are local files and are ignored by Git. Commit only sanitized examples such as `settings.example.json`, `sync.example.json`, and `.env.example`.
 - Never commit API keys, bearer tokens, GitHub tokens, Telegram tokens, snapshot data from private Directus instances, or secrets copied from the environment.
 - Keep network access bounded by the existing size limits, authentication rules, timeouts, and validation. Avoid logging authorization headers, tokens, or full sensitive payloads.
 - Do not perform live GitHub writes, Telegram notifications, releases, or deployments unless the task explicitly requests them.
