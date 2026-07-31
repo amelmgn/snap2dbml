@@ -1,4 +1,4 @@
-## Unreleased [2026-07-30]
+## 2.0.0 [2026-07-30]
 
 Added structured logging and a status endpoint to the service. All server and sync output is now emitted as JSON lines on stdout (`{"time","level","scope","msg",...}`) through a new zero-dependency logger (`src/logger.ts`) with `debug`/`info`/`warn`/`error` levels controlled by `LOG_LEVEL` (default `info`). HTTP requests are logged with method, path (query string stripped), status, and duration; `/health` logs at `debug` so container healthchecks stay out of the default stream. Errors carry serialized `message`/`stack` fields. The one-shot `snap2dbml sync` CLI command logs human-readable text to stderr instead of JSON.
 
