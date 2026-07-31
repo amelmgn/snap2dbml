@@ -8,6 +8,8 @@ sync.json
 sync.stage.json
 *.dbml
 .DS_Store
+docker/*/.env
+docker/*/sync.json
 .env
 .env.stage
 .claude/

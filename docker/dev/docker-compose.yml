@@ -1,6 +1,7 @@
 services:
   snap2dbml:
-    build: .
+    build:
+      context: ../..
     ports:
       - "3001:3000"
     env_file:

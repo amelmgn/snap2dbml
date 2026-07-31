@@ -276,16 +276,16 @@ The service writes structured JSON logs to stdout, one object per line: `{"time"
 
 ## Docker
 
-Docker runs the HTTP service from the same production image. Production, staging, and local builds use separate Compose files to make the selected environment explicit.
+Docker configuration is organized by environment under `docker/`. Each environment folder contains its own `docker-compose.yml` and sanitized `.env.example` file.
 
 ### Local Docker build
 
-`docker-compose.dev.yml` builds an image from the current checkout and exposes it on port `3001`:
+`docker/dev/docker-compose.yml` builds an image from the current checkout and exposes it on port `3001`:
 
 ```bash
-cp .env.example .env
-# Set API_KEY in .env
-docker compose -f docker-compose.dev.yml up -d --build
+cp docker/dev/.env.example docker/dev/.env
+# Set API_KEY in docker/dev/.env
+docker compose --env-file docker/dev/.env -f docker/dev/docker-compose.yml up -d --build
 curl http://localhost:3001/health
 ```
 
@@ -293,27 +293,27 @@ This configuration validates the local Docker build. It does not mount source fi
 
 ### Production deployment
 
-`docker-compose.yml` pulls the published `:prod` image and exposes it on port `3000`:
+`docker/prod/docker-compose.yml` pulls the published `:prod` image and exposes it on port `3000`:
 
 ```bash
-cp .env.example .env
-# Set API_KEY and GHCR_OWNER in .env
-docker compose pull
-docker compose up -d
+cp docker/prod/.env.example docker/prod/.env
+# Set API_KEY and GHCR_OWNER in docker/prod/.env
+docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml pull
+docker compose --env-file docker/prod/.env -f docker/prod/docker-compose.yml up -d
 curl http://localhost:3000/health
 ```
 
-GitHub Actions publishes images for pushes to the `stage` and `prod` branches. Each build receives the branch tag and an immutable `sha-<short>` tag. No `latest` tag is published. Set `IMAGE_TAG=sha-...` in `.env` to pin production to an immutable build.
+GitHub Actions publishes images for pushes to the `stage` and `prod` branches. Each build receives the branch tag and an immutable `sha-<short>` tag. No `latest` tag is published. Set `IMAGE_TAG=sha-...` in `docker/prod/.env` to pin production to an immutable build.
 
 ### Staging deployment
 
-`docker-compose.stage.yml` pulls the `:stage` image and runs alongside production on port `3001`:
+`docker/stage/docker-compose.yml` pulls the `:stage` image and runs alongside production on port `3001`:
 
 ```bash
-cp .env.example .env.stage
-# Set a separate API_KEY in .env.stage
-docker compose --env-file .env.stage -f docker-compose.stage.yml -p snap2dbml-stage pull
-docker compose --env-file .env.stage -f docker-compose.stage.yml -p snap2dbml-stage up -d
+cp docker/stage/.env.example docker/stage/.env
+# Set a separate API_KEY in docker/stage/.env
+docker compose --env-file docker/stage/.env -f docker/stage/docker-compose.yml -p snap2dbml-stage pull
+docker compose --env-file docker/stage/.env -f docker/stage/docker-compose.yml -p snap2dbml-stage up -d
 curl http://localhost:3001/health
 ```
 
@@ -342,14 +342,14 @@ DIRECTUS_TOKEN=your-directus-token
 GITHUB_TOKEN=your-github-token
 ```
 
-Mount the matching configuration into the container by enabling the volume in the relevant Compose file:
+Mount the matching configuration into the container by enabling the volume in the relevant Compose file. Place it beside that Compose file (for example, `docker/prod/sync.json`):
 
 ```yaml
 volumes:
   - ./sync.json:/app/sync.json:ro
 ```
 
-For staging, use a separate `sync.stage.json` and mount it at the path specified by `.env.stage`.
+For staging, use a separate `docker/stage/sync.json` that targets a sandbox repository or branch.
 
 ## Library API
 
