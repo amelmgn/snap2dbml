@@ -26,15 +26,45 @@ function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-// UTC, matching the commit message timestamp; same format as the CLI (schema_YYYYMMDD_HHMMSS)
-function formatTimestamp(date: Date): string {
-  const yyyy = String(date.getUTCFullYear());
-  const MM = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(date.getUTCDate()).padStart(2, '0');
-  const HH = String(date.getUTCHours()).padStart(2, '0');
-  const mm = String(date.getUTCMinutes()).padStart(2, '0');
-  const ss = String(date.getUTCSeconds()).padStart(2, '0');
-  return `${yyyy}${MM}${dd}_${HH}${mm}${ss}`;
+interface TimestampParts {
+  year: string;
+  month: string;
+  day: string;
+  hour: string;
+  minute: string;
+  second: string;
+}
+
+function getTimestampParts(date: Date, timezone: string): TimestampParts {
+  const formatted = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const parts = Object.fromEntries(formatted.map(part => [part.type, part.value]));
+  return {
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    hour: parts.hour,
+    minute: parts.minute,
+    second: parts.second,
+  };
+}
+
+function formatTimestamp(date: Date, timezone: string): string {
+  const { year, month, day, hour, minute, second } = getTimestampParts(date, timezone);
+  return `${year}${month}${day}_${hour}${minute}${second}`;
+}
+
+function formatCommitTime(date: Date, timezone: string): string {
+  const { year, month, day, hour, minute, second } = getTimestampParts(date, timezone);
+  return `${year}-${month}-${day} ${hour}:${minute}:${second} ${timezone}`;
 }
 
 async function fetchDirectusSnapshot(url: string, bearerToken: string): Promise<DirectusSnapshot> {
@@ -45,10 +75,6 @@ async function fetchDirectusSnapshot(url: string, bearerToken: string): Promise<
     throw new Error(`Directus snapshot fetch failed: HTTP ${response.status} ${response.statusText}`);
   }
   return response.json() as Promise<DirectusSnapshot>;
-}
-
-function formatNotificationTime(date: Date): string {
-  return date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
 }
 
 function formatFailureReason(err: unknown, target: SyncTarget): string {
@@ -68,7 +94,13 @@ async function performSync(
   target: SyncTarget,
   logger: Logger,
 ): Promise<{ committed: boolean }> {
-  const { directus, github, generateMarkdown = false, convertOptions } = target;
+  const {
+    directus,
+    github,
+    generateMarkdown = false,
+    convertOptions,
+    timezone = 'UTC',
+  } = target;
   const { owner, repo: repoName } = resolveGitHubRepository(github);
   const repo: GitHubRepo = {
     owner,
@@ -89,7 +121,7 @@ async function performSync(
   );
 
   const now = new Date();
-  const ts = formatTimestamp(now);
+  const ts = formatTimestamp(now, timezone);
 
   const newFiles: FileChange[] = [
     { path: github.snapshotPath, content: snapshotJson },
@@ -100,8 +132,7 @@ async function performSync(
   ];
 
   const newPaths = new Set(newFiles.map(f => f.path));
-  const nowIso = now.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-  const commitMessage = `Snapshot updated at ${nowIso}`;
+  const commitMessage = `Snapshot updated at ${formatCommitTime(now, timezone)}`;
 
   let committed = false;
   for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
@@ -152,7 +183,7 @@ export async function runSync(
   target: SyncTarget,
   baseLogger: Logger = createLogger(),
 ): Promise<{ committed: boolean }> {
-  const { name, telegram } = target;
+  const { name, telegram, timezone = 'UTC' } = target;
   const logger = baseLogger.child(`sync:${name}`);
 
   try {
@@ -163,7 +194,7 @@ export async function runSync(
         renderTelegramMessage(
           telegram,
           result.committed ? 'success' : 'noChanges',
-          { name, time: formatNotificationTime(new Date()) },
+          { name, time: formatCommitTime(new Date(), timezone) },
         ),
         logger,
       );
@@ -175,7 +206,7 @@ export async function runSync(
         telegram,
         renderTelegramMessage(telegram, 'failure', {
           name,
-          time: formatNotificationTime(new Date()),
+          time: formatCommitTime(new Date(), timezone),
           error: formatFailureReason(err, target),
         }),
         logger,

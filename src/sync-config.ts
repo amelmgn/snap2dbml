@@ -89,7 +89,7 @@ export interface SyncTarget {
   name: string;
   /** Cron expression, e.g. "0 0 * * 1-5". Supports the full croner syntax. */
   schedule: string;
-  /** Optional IANA timezone for the schedule, e.g. "Europe/Podgorica". Defaults to server-local time. */
+  /** IANA timezone for the schedule, generated filenames, and commit messages. Default: "UTC". */
   timezone?: string;
   directus: DirectusSyncConfig;
   github: GitHubSyncConfig;
@@ -165,12 +165,15 @@ function validateSyncTargets(syncs: unknown[]): void {
 
     requireString(target, 'name', ctx);
     requireString(target, 'schedule', ctx);
-    if (target.timezone !== undefined && typeof target.timezone !== 'string') {
-      throw new Error(`${ctx}.timezone must be a string (IANA timezone name)`);
+    if (
+      target.timezone !== undefined
+      && (typeof target.timezone !== 'string' || target.timezone.length === 0)
+    ) {
+      throw new Error(`${ctx}.timezone must be a non-empty IANA timezone name`);
     }
     try {
       const probe = new Cron(target.schedule as string, {
-        timezone: target.timezone as string | undefined,
+        timezone: (target.timezone as string | undefined) ?? 'UTC',
       });
       // Timezone problems only surface when a run time is computed
       probe.nextRun();

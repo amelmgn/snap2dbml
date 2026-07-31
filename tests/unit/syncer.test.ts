@@ -44,6 +44,7 @@ describe('runSync', () => {
     let treeCreated = 0;
     let refUpdated = 0;
     const submittedTrees: Array<Array<{ path: string; sha?: string | null }>> = [];
+    const commitMessages: string[] = [];
 
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -77,6 +78,7 @@ describe('runSync', () => {
         return jsonResponse({ sha: `tree-${treeCreated}` });
       }
       if (url.endsWith('/git/commits') && method === 'POST') {
+        commitMessages.push(JSON.parse(String(init?.body)).message);
         return jsonResponse({ sha: `commit-${treeCreated}` });
       }
       if (url.endsWith('/git/refs/heads/main') && method === 'PATCH') {
@@ -89,14 +91,23 @@ describe('runSync', () => {
     }));
 
     const { logger, records } = captureLogger();
-    const { committed } = await runSync(target, logger);
+    const { committed } = await runSync({
+      ...target,
+      timezone: 'Asia/Tashkent',
+    }, logger);
 
     expect(committed).toBe(true);
     expect(submittedTrees).toHaveLength(2);
     expect(submittedTrees[1]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'Directus/schema/schema_20260730_050002.dbml' }),
+      expect.objectContaining({ path: 'Directus/schema/description_20260730_050002.md' }),
       expect.objectContaining({ path: 'Directus/schema/schema_competing.dbml', sha: null }),
       expect.objectContaining({ path: 'Directus/schema/description_competing.md', sha: null }),
     ]));
+    expect(commitMessages).toEqual([
+      'Snapshot updated at 2026-07-30 05:00:02 Asia/Tashkent',
+      'Snapshot updated at 2026-07-30 05:00:02 Asia/Tashkent',
+    ]);
     expect(submittedTrees[1].some(item => item.path.endsWith('README.txt'))).toBe(false);
     expect(records).toContainEqual(
       expect.objectContaining({
@@ -140,6 +151,11 @@ describe('runSync', () => {
     const { committed } = await runSync(syncTarget, captureLogger().logger);
 
     expect(committed).toBe(false);
+    const treeRequest = requests.find(request => request.url.endsWith('/git/trees'));
+    expect(JSON.parse(String(treeRequest?.init?.body)).tree).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'Directus/schema/schema_20260730_000002.dbml' }),
+      expect.objectContaining({ path: 'Directus/schema/description_20260730_000002.md' }),
+    ]));
     const telegramRequest = requests.find(request => request.url.startsWith(
       'https://api.telegram.org/',
     ));
@@ -153,6 +169,9 @@ describe('runSync', () => {
   it.each(['failure', 'always'] as const)(
     'notifies on failure in "%s" mode and preserves the original error',
     async (notifyOn) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-30T00:00:02Z'));
+
       const requests: Array<{ url: string; init?: RequestInit }> = [];
       vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
@@ -168,11 +187,12 @@ describe('runSync', () => {
 
       const syncTarget: SyncTarget = {
         ...target,
+        timezone: 'Asia/Tashkent',
         telegram: {
           botToken: 'bot-token',
           chatId: 'chat-id',
           notifyOn,
-          messages: { failure: 'Sync {{name}} failed: {{error}}' },
+          messages: { failure: 'Sync {{name}} failed at {{time}}: {{error}}' },
         },
       };
       const { logger, records } = captureLogger();
@@ -185,7 +205,7 @@ describe('runSync', () => {
       ));
       expect(JSON.parse(String(telegramRequest?.init?.body))).toMatchObject({
         chat_id: 'chat-id',
-        text: 'Sync test failed: Directus snapshot fetch failed: HTTP 401 ',
+        text: 'Sync test failed at 2026-07-30 05:00:02 Asia/Tashkent: Directus snapshot fetch failed: HTTP 401 ',
       });
       expect(records).toContainEqual(expect.objectContaining({
         level: 'warn',

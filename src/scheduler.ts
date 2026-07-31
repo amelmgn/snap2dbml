@@ -9,7 +9,7 @@ import type { SyncTarget } from './sync-config.js';
  * Validate a cron expression (and optional IANA timezone) and return the next
  * run time. Throws with a descriptive error when either is invalid.
  */
-export function getNextRun(expression: string, timezone?: string): Date | null {
+export function getNextRun(expression: string, timezone = 'UTC'): Date | null {
   const probe = new Cron(expression, { timezone });
   try {
     // Timezone problems only surface when a run time is computed
@@ -40,7 +40,7 @@ export class SyncScheduler {
         const job: Cron = new Cron(
           target.schedule,
           {
-            timezone: target.timezone,
+            timezone: target.timezone ?? 'UTC',
             protect: true,
             unref: true,
             catch: (err) => {

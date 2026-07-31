@@ -91,7 +91,9 @@ describe('schedule validation at config load', () => {
 
   it('rejects a non-string timezone', () => {
     const path = writeConfig({ ...validTarget, timezone: 42 });
-    expect(() => loadSyncConfig(path)).toThrow(/syncs\[0\]\.timezone must be a string/);
+    expect(() => loadSyncConfig(path)).toThrow(
+      /syncs\[0\]\.timezone must be a non-empty IANA timezone name/,
+    );
   });
 
   it.each(['success', 'failure', 'always'] as const)(
