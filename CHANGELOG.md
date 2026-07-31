@@ -1,24 +1,22 @@
+## 3.0.0 [2026-07-31]
+
+Expanded the existing per-target `timezone` setting to control cron evaluation, generated DBML/Markdown filenames, matching GitHub commit messages, and Telegram's `{{time}}` placeholder. The setting accepts a validated IANA timezone. Its default changed from server-local time for cron to `UTC` for every sync timestamp and schedule; deployments that relied on the host timezone must now set `timezone` explicitly.
+
+Added configurable Telegram notification outcomes. `telegram.notifyOn` accepts `success`, `failure`, or `always` and defaults to `success`. Successful no-change runs count as success, failure notifications preserve the original sync error, and Telegram delivery remains non-fatal.
+
+Added per-outcome Telegram message templates for runs that create a commit, complete without changes, or fail. `telegram.messages.success`, `noChanges`, and `failure` support `{{name}}`, `{{time}}`, and `{{error}}` placeholders, while omitted templates retain the previous English messages.
+
+Consolidated Docker deployment into `docker/docker-compose.yml` and one shared `docker/.env`. Production and profile-gated stage services use separate image tags and containers but intentionally share port `3000`, credentials, and the optional sync mount, making them mutually exclusive replacement instances. CI publishes `stage`, `prod`, and immutable `sha-*` tags without publishing `latest`; the documented switch and rollback flows preserve the stopped replacement container.
+
+Aligned package metadata and repository guidance with the current deployment layout, added project instructions for coding agents, and moved the Markdown template under `docs/`.
+
+Updated files: `package.json`, `package-lock.json`, `src/sync-config.ts`, `src/syncer.ts`, `src/sync.ts`, `src/scheduler.ts`, `src/telegram.ts`, `sync.example.json`, `docker/docker-compose.yml`, `docker/.env.example`, removed root and environment-specific Compose assets, `.github/workflows/docker-publish.yml`, `.gitignore`, `README.md`, `docs/tech-spec.md`, `docs/md-template.md`, `AGENTS.md`, `CLAUDE.md`, `tests/unit/sync-config.test.ts`, `tests/unit/syncer.test.ts`, `tests/unit/scheduler.test.ts`, `tests/unit/telegram.test.ts`.
+
 ## 2.0.0 [2026-07-30]
-
-Expanded the existing per-target `timezone` setting to control timestamps in generated DBML/Markdown filenames, matching GitHub commit messages, and Telegram's `{{time}}` placeholder as well as cron evaluation. The single setting accepts a validated IANA timezone and defaults to `UTC` for deterministic schedules and output.
-
-Updated files: `src/sync-config.ts`, `src/syncer.ts`, `src/scheduler.ts`, `README.md`, `docs/tech-spec.md`, `tests/unit/sync-config.test.ts`, `tests/unit/syncer.test.ts`, `tests/unit/scheduler.test.ts`.
-
-Added configurable Telegram message templates for sync runs that create a commit, complete without changes, or fail. Templates support `{{name}}`, `{{time}}`, and `{{error}}` placeholders; every field is optional and retains the existing English notification text by default.
-
-Updated files: `src/sync-config.ts`, `src/syncer.ts`, `src/sync.ts`, `src/telegram.ts`, `sync.example.json`, `README.md`, `docs/tech-spec.md`, `tests/unit/sync-config.test.ts`, `tests/unit/syncer.test.ts`, `tests/unit/telegram.test.ts`.
-
-Added configurable Telegram notification outcomes for automated sync targets. `telegram.notifyOn` accepts `success`, `failure`, or `always` and defaults to `success` for existing configurations. Success covers every completed sync, including runs where GitHub needs no new commit; failure notifications preserve the original sync error and Telegram delivery remains non-fatal. Telegram configuration is now validated when `sync.json` is loaded.
-
-Updated files: `src/sync-config.ts`, `src/syncer.ts`, `src/sync.ts`, `src/telegram.ts`, `sync.example.json`, `README.md`, `docs/tech-spec.md`, `tests/unit/sync-config.test.ts`, `tests/unit/syncer.test.ts`, `tests/unit/telegram.test.ts`.
-
-Consolidated Docker deployment into `docker/docker-compose.yml` and one shared `docker/.env`. Production and profile-gated stage services retain separate image tags and containers but intentionally share port `3000`, credentials, and the optional sync mount, making them mutually exclusive replacement instances. The documented switch flow pulls stage before stopping production, tests stage against the live configuration, then pulls the promoted production image and switches back; the stopped production container remains available for immediate rollback.
-
-Updated files: `docker/docker-compose.yml`, `docker/.env.example`, removed `docker/dev`, `docker/stage`, and `docker/prod` Compose assets, `.github/workflows/docker-publish.yml`, `.gitignore`, `README.md`, `docs/tech-spec.md`, `AGENTS.md`, `CLAUDE.md`.
 
 Added structured logging and a status endpoint to the service. All server and sync output is now emitted as JSON lines on stdout (`{"time","level","scope","msg",...}`) through a new zero-dependency logger (`src/logger.ts`) with `debug`/`info`/`warn`/`error` levels controlled by `LOG_LEVEL` (default `info`). HTTP requests are logged with method, path (query string stripped), status, and duration; `/health` logs at `debug` so container healthchecks stay out of the default stream. Errors carry serialized `message`/`stack` fields. The one-shot `snap2dbml sync` CLI command logs human-readable text to stderr instead of JSON.
 
-Capped Docker log storage for the production and stage services at 3 rotated files of 10 MB each through the shared options in `docker/docker-compose.yml`, so the json-file driver cannot grow unbounded on long-running hosts.
+Capped Docker log storage for the production and staging containers at 3 rotated files of 10 MB each (`logging` options in `docker-compose.yml` and `docker-compose.stage.yml`), so the json-file driver cannot grow unbounded on long-running hosts.
 
 Added `GET /status` (API-key protected). It reports service version, uptime, whether the scheduler is active, per-target sync state (last run, outcome, whether a commit was produced, last error, next run) tracked by a new in-memory `StatusRegistry` (`src/status.ts`), and a ring buffer of the last 200 log records. `runSync` now returns `{ committed }` so callers and the registry see the run outcome.
 
@@ -38,6 +36,8 @@ Standardized sync timestamps. Generated files now use `schema_YYYYMMDD_HHMMSS.db
 
 Added regression coverage for concurrent branch updates, complete DBML/Markdown cleanup, preservation of unrelated files, suppression of commits whose resulting Git tree is unchanged, and compact GitHub repository parsing. The full suite now contains 207 passing tests.
 
+Separated staging and production deployment. Added `docker-compose.stage.yml` for a stage container on port 3001 with its own Compose project and `.env.stage`. Production now pulls the explicit `:prod` image tag by default and can be pinned to an immutable `sha-*` tag through `IMAGE_TAG`; staging uses `:stage` or `STAGE_IMAGE_TAG`. CI explicitly disables `latest` and publishes a branch tag plus an immutable SHA tag on each build.
+
 Simplified GitHub sync configuration and documented the migration. The preferred `github.repository` field combines the repository owner and name in `owner/repo` form and also accepts a full `https://github.com/owner/repo` URL. Repository identifiers do not encode a branch, so `branch` remains a separate optional field and defaults to `main`. Existing configs that use separate `owner` and `repo` fields remain supported, while mixing both formats is rejected as ambiguous.
 
 Restructured `README.md` by usage surface. CLI installation, settings, sync configuration, commands, options, and exit codes now live under one CLI section. The REST contract and native server startup are isolated under HTTP API, while local image builds, production, staging, container variables, and scheduled sync mounts are grouped under Docker. The library API remains a separate section.
@@ -50,7 +50,7 @@ Hardened the scheduler and HTTP server. Cron rejects zero steps, inverted or out
 
 Reduced duplicate work in conversion and sync. CLI Markdown generation now uses the shared single-pass artifact pipeline, and GitHub blobs are created in parallel. Removed the unused `UnsupportedFieldError` class and `ERROR_CODES.UNSUPPORTED_VERSION` constant.
 
-Updated files: `src/sync-config.ts`, `src/syncer.ts`, `src/github-client.ts`, `src/scheduler.ts`, `src/server.ts`, `src/transformer.ts`, `src/parser.ts`, `src/generator.ts`, `src/conversion.ts`, `src/errors.ts`, `src/type-map.ts`, `bin/snap2dbml.js`, `sync.example.json`, `docker/docker-compose.yml`, `docker/.env.example`, `.github/workflows/docker-publish.yml`, `README.md`, `tests/unit/sync-config.test.ts`, `tests/unit/syncer.test.ts`, `tests/unit/github-client.test.ts`, and related regression tests.
+Updated files: `src/sync-config.ts`, `src/syncer.ts`, `src/github-client.ts`, `src/scheduler.ts`, `src/server.ts`, `src/transformer.ts`, `src/parser.ts`, `src/generator.ts`, `src/conversion.ts`, `src/errors.ts`, `src/type-map.ts`, `bin/snap2dbml.js`, `sync.example.json`, `docker-compose.yml`, `docker-compose.stage.yml`, `.github/workflows/docker-publish.yml`, `README.md`, `tests/unit/sync-config.test.ts`, `tests/unit/syncer.test.ts`, `tests/unit/github-client.test.ts`, and related regression tests.
 
 ## 1.1.0 [2026-03-17]
 
